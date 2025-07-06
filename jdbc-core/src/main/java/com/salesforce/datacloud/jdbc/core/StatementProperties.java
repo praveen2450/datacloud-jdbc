@@ -20,6 +20,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.TimeZone;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.With;
@@ -126,5 +127,22 @@ public class StatementProperties {
         }
 
         return props;
+    }
+
+    /**
+     * Gets the timezone setting value.
+     * @return the timezone string, or null if not set
+     */
+    public String getTimezone() {
+        return querySettings.get("timezone");
+    }
+
+    /**
+     * Gets the session timezone, falling back to system default if not specified.
+     * @return the session TimeZone
+     */
+    public TimeZone getSessionTimeZone() {
+        String timezone = getTimezone();
+        return timezone != null ? TimeZone.getTimeZone(timezone) : TimeZone.getDefault();
     }
 }

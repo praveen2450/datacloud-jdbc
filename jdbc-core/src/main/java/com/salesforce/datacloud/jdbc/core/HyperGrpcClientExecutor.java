@@ -30,11 +30,13 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import lombok.AccessLevel;
 import lombok.Builder;
+import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
@@ -83,6 +85,19 @@ public class HyperGrpcClientExecutor {
         }
 
         return builder.build();
+    }
+
+    public static HyperGrpcClientExecutor of(
+            @NonNull HyperServiceGrpc.HyperServiceBlockingStub stub, @NonNull Properties properties) {
+        try {
+            val connectionProps = ConnectionProperties.of(properties);
+            val settings = connectionProps.getStatementProperties().getQuerySettings();
+            return of(stub, settings);
+        } catch (Exception e) {
+            // Fallback to empty settings if property parsing fails
+            log.warn("Failed to parse connection properties, using empty query settings", e);
+            return of(stub, new HashMap<>());
+        }
     }
 
     public HyperGrpcClientExecutor withQueryParams(QueryParam additionalQueryParams) {

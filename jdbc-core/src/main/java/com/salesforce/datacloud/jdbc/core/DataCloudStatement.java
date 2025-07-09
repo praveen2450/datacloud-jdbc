@@ -15,16 +15,12 @@
  */
 package com.salesforce.datacloud.jdbc.core;
 
-import static com.salesforce.datacloud.jdbc.core.HyperGrpcClientExecutor.HYPER_MAX_ROW_LIMIT_BYTE_SIZE;
-import static com.salesforce.datacloud.jdbc.core.HyperGrpcClientExecutor.HYPER_MIN_ROW_LIMIT_BYTE_SIZE;
-import static com.salesforce.datacloud.jdbc.util.Constants.BYTE_LIMIT;
-import static com.salesforce.datacloud.jdbc.util.Constants.DEFAULT_QUERY_TIMEOUT;
-import static com.salesforce.datacloud.jdbc.util.PropertiesExtensions.getIntegerOrDefault;
-
 import com.salesforce.datacloud.jdbc.core.listener.AdaptiveQueryStatusListener;
 import com.salesforce.datacloud.jdbc.core.listener.AsyncQueryStatusListener;
 import com.salesforce.datacloud.jdbc.core.listener.QueryStatusListener;
+import com.salesforce.datacloud.jdbc.core.partial.RowBased;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
+import com.salesforce.datacloud.jdbc.util.Constants;
 import com.salesforce.datacloud.jdbc.util.SqlErrorCodes;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -48,21 +44,30 @@ public class DataCloudStatement implements Statement, AutoCloseable {
     protected static final String BATCH_EXECUTION_IS_NOT_SUPPORTED =
             "Batch execution is not supported in Data Cloud query";
     protected static final String CHANGE_FETCH_DIRECTION_IS_NOT_SUPPORTED = "Changing fetch direction is not supported";
-    private static final String QUERY_TIMEOUT = "queryTimeout";
 
-    private int queryTimeout;
+    private StatementProperties statementProperties;
+
+    /**
+     * The target maximum number of rows for a query. The default means disabled.
+     */
+    @Getter(AccessLevel.PACKAGE)
+    private int targetMaxRows = 0;
+
+    /**
+     * The target maximum number of bytes per RPC response. This is only relevant when `targetMaxRows > 0`.
+     * The default means disabled.
+     */
+    @Getter(AccessLevel.PACKAGE)
+    private int targetMaxBytes = 0;
 
     public DataCloudStatement(@NonNull DataCloudConnection connection) {
         this.connection = connection;
-        val properties = connection.getClientInfo();
-        this.queryTimeout = getIntegerOrDefault(properties, QUERY_TIMEOUT, DEFAULT_QUERY_TIMEOUT);
-        this.targetMaxBytes = getIntegerOrDefault(properties, BYTE_LIMIT, HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
+        this.statementProperties = connection.getConnectionProperties().getStatementProperties();
     }
 
     protected HyperGrpcClientExecutor getQueryExecutor() throws DataCloudJDBCException {
-        val properties = connection.getClientInfo();
-        val stub = connection.getStub(getQueryTimeoutDuration());
-        return HyperGrpcClientExecutor.of(stub, properties, targetMaxBytes);
+        val stub = connection.getStub();
+        return HyperGrpcClientExecutor.of(stub, statementProperties.getQuerySettings());
     }
 
     protected QueryStatusListener listener;
@@ -87,7 +92,7 @@ public class DataCloudStatement implements Statement, AutoCloseable {
     public boolean execute(String sql) throws SQLException {
         log.debug("Entering execute");
         val client = getQueryExecutor();
-        resultSet = executeAdaptiveQuery(sql, client, getQueryTimeoutDuration());
+        resultSet = executeAdaptiveQuery(sql, client, getEffectiveQueryTimeoutDuration());
         return true;
     }
 
@@ -95,17 +100,16 @@ public class DataCloudStatement implements Statement, AutoCloseable {
     public ResultSet executeQuery(String sql) throws SQLException {
         log.debug("Entering executeQuery");
         val client = getQueryExecutor();
-        resultSet = executeAdaptiveQuery(sql, client, getQueryTimeoutDuration());
+        resultSet = executeAdaptiveQuery(sql, client, getEffectiveQueryTimeoutDuration());
         return resultSet;
     }
 
     protected DataCloudResultSet executeAdaptiveQuery(String sql, HyperGrpcClientExecutor client, Duration timeout)
             throws SQLException {
-        val queryTimeout = resolveQueryTimeout(timeout);
-
         listener = targetMaxRows > 0
-                ? AdaptiveQueryStatusListener.of(sql, client, queryTimeout, targetMaxRows)
-                : AdaptiveQueryStatusListener.of(sql, client, queryTimeout);
+                ? AdaptiveQueryStatusListener.of(
+                        sql, client, getEffectiveQueryTimeoutDuration(), targetMaxRows, targetMaxBytes)
+                : AdaptiveQueryStatusListener.of(sql, client, getEffectiveQueryTimeoutDuration());
 
         resultSet = listener.generateResultSet();
         log.info("executeAdaptiveQuery completed. queryId={}", listener.getQueryId());
@@ -119,7 +123,7 @@ public class DataCloudStatement implements Statement, AutoCloseable {
     }
 
     protected DataCloudStatement executeAsyncQuery(String sql, HyperGrpcClientExecutor client) throws SQLException {
-        listener = AsyncQueryStatusListener.of(sql, client, getQueryTimeoutDuration());
+        listener = AsyncQueryStatusListener.of(sql, client, getEffectiveQueryTimeoutDuration());
         log.info("executeAsyncQuery completed. queryId={}", listener.getQueryId());
         return this;
     }
@@ -150,41 +154,31 @@ public class DataCloudStatement implements Statement, AutoCloseable {
     @Override
     public void setMaxFieldSize(int max) {}
 
-    @Getter(AccessLevel.PACKAGE)
-    private int targetMaxRows;
-
-    @Getter(AccessLevel.PACKAGE)
-    private int targetMaxBytes;
-
     public void clearResultSetConstraints() throws DataCloudJDBCException {
-        setResultSetConstraints(0, HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
-    }
-
-    private void checkResultSetConstraints(int maxRows, int maxBytes) throws DataCloudJDBCException {
-        if (maxRows < 0) {
-            throw new DataCloudJDBCException(
-                    "setResultSetConstraints maxRows must be set to 0 to be disabled but was " + maxRows);
-        }
-
-        if (maxBytes < HYPER_MIN_ROW_LIMIT_BYTE_SIZE || maxBytes > HYPER_MAX_ROW_LIMIT_BYTE_SIZE) {
-            throw new DataCloudJDBCException(String.format(
-                    "The specified maxBytes (%d) must satisfy the following constraints: %d >= x >= %d",
-                    maxBytes, HYPER_MIN_ROW_LIMIT_BYTE_SIZE, HYPER_MAX_ROW_LIMIT_BYTE_SIZE));
-        }
+        setResultSetConstraints(0, RowBased.HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
     }
 
     /**
      * Sets the constraints that would limit the number of rows and overall bytes in any ResultSet object generated by this Statement.
      * This is used to tell the database the maximum number of rows and bytes to return, you may get less than expected because of this.
      *
-     * @param maxRows The target maximum number of rows a ResultSet can have, zero means there is no limit.
-     * @param maxBytes The target maximum byte size a ResultSet can be,
-     *                 must fall in the range {@link HyperGrpcClientExecutor#HYPER_MIN_ROW_LIMIT_BYTE_SIZE}
-     *                 and {@link HyperGrpcClientExecutor#HYPER_MAX_ROW_LIMIT_BYTE_SIZE}
+     * @param maxRows The maximum number of rows a ResultSet can have, zero means there is no limit.
+     * @param maxBytes The maximum byte size a ResultSet can be,
+     *                 must fall in the range {@link RowBased#HYPER_MIN_ROW_LIMIT_BYTE_SIZE}
+     *                 and {@link RowBased#HYPER_MAX_ROW_LIMIT_BYTE_SIZE}
      * @throws DataCloudJDBCException If the target maximum byte size is outside the aforementioned range
      */
     public void setResultSetConstraints(int maxRows, int maxBytes) throws DataCloudJDBCException {
-        checkResultSetConstraints(maxRows, maxBytes);
+        if (maxRows < 0) {
+            throw new DataCloudJDBCException(
+                    "setResultSetConstraints maxRows must be set to 0 to be disabled but was " + maxRows);
+        }
+
+        if (maxBytes < RowBased.HYPER_MIN_ROW_LIMIT_BYTE_SIZE || maxBytes > RowBased.HYPER_MAX_ROW_LIMIT_BYTE_SIZE) {
+            throw new DataCloudJDBCException(String.format(
+                    "The specified maxBytes (%d) must satisfy the following constraints: %d >= x >= %d",
+                    maxBytes, RowBased.HYPER_MIN_ROW_LIMIT_BYTE_SIZE, RowBased.HYPER_MAX_ROW_LIMIT_BYTE_SIZE));
+        }
 
         targetMaxRows = maxRows;
         targetMaxBytes = maxBytes;
@@ -195,7 +189,7 @@ public class DataCloudStatement implements Statement, AutoCloseable {
      * @param maxRows The target maximum number of rows a ResultSet can have, zero means there is no limit.
      */
     public void setResultSetConstraints(int maxRows) throws DataCloudJDBCException {
-        setResultSetConstraints(maxRows, HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
+        setResultSetConstraints(maxRows, RowBased.HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
     }
 
     @Override
@@ -209,33 +203,41 @@ public class DataCloudStatement implements Statement, AutoCloseable {
     @Override
     public void setEscapeProcessing(boolean enable) {}
 
-    protected Duration resolveQueryTimeout(Duration timeout) {
-        if (timeout == null) {
-            return getQueryTimeoutDuration();
+    /**
+     * This translates the user visible query timeout behavior (zero is infinite) to the internal expectation of the code
+     * (which would interpret zero as literal zero timeout). Thus zero is translated to a practically infinite timeout by using
+     * a large second count.
+     *
+     * Note: This behavior should be fixed in the future by changing the internal code to interpret zero as not setting any timeout at all.
+     * @return The effective query timeout duration.
+     */
+    protected Duration getEffectiveQueryTimeoutDuration() {
+        if (statementProperties.getQueryTimeout() == Duration.ZERO) {
+            return Duration.ofSeconds(Constants.INFINITE_QUERY_TIMEOUT);
         }
-
-        if (timeout.isZero() || timeout.isNegative()) {
-            return Duration.ofSeconds(DEFAULT_QUERY_TIMEOUT);
-        }
-
-        return timeout;
+        return statementProperties.getQueryTimeout();
     }
 
-    protected Duration getQueryTimeoutDuration() {
-        return Duration.ofSeconds(getQueryTimeout());
-    }
-
+    /**
+     * @return The query timeout for this statement in seconds.
+     */
     @Override
     public int getQueryTimeout() {
-        return queryTimeout;
+        return (int) statementProperties.getQueryTimeout().getSeconds();
     }
 
+    /**
+     * Sets the query timeout for this statement. A zero or negative value is interpreted as infinite timeout.
+     * @param seconds The query timeout in seconds.
+     */
     @Override
     public void setQueryTimeout(int seconds) {
+        // We use the ``withQueryTimeout`` method to create a new statement properties object with the updated timeout
+        // to avoid changing the shared object with the default connection query timeout.
         if (seconds <= 0) {
-            this.queryTimeout = DEFAULT_QUERY_TIMEOUT;
+            statementProperties = statementProperties.withQueryTimeout(Duration.ZERO);
         } else {
-            this.queryTimeout = seconds;
+            statementProperties = statementProperties.withQueryTimeout(Duration.ofSeconds(seconds));
         }
     }
 

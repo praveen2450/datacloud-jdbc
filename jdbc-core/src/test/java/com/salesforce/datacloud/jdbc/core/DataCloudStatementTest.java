@@ -15,8 +15,6 @@
  */
 package com.salesforce.datacloud.jdbc.core;
 
-import static com.salesforce.datacloud.jdbc.core.HyperGrpcClientExecutor.HYPER_MAX_ROW_LIMIT_BYTE_SIZE;
-import static com.salesforce.datacloud.jdbc.core.HyperGrpcClientExecutor.HYPER_MIN_ROW_LIMIT_BYTE_SIZE;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -24,15 +22,16 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.google.common.collect.ImmutableList;
+import com.salesforce.datacloud.jdbc.core.partial.RowBased;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
-import com.salesforce.datacloud.jdbc.util.Constants;
 import com.salesforce.datacloud.jdbc.util.GrpcUtils;
 import com.salesforce.datacloud.jdbc.util.SqlErrorCodes;
 import io.grpc.StatusRuntimeException;
+import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.Statement;
 import java.time.Duration;
 import java.util.Properties;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Stream;
 import lombok.SneakyThrows;
 import lombok.val;
@@ -47,7 +46,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
-import org.mockito.Mockito;
 import salesforce.cdp.hyperdb.v1.HyperServiceGrpc;
 
 @ExtendWith(InProcessGrpcMockExtension.class)
@@ -132,12 +130,12 @@ public class DataCloudStatementTest extends HyperGrpcTestBase {
     @Test
     public void testSetQueryTimeoutNegativeValue() {
         statement.setQueryTimeout(-100);
-        assertThat(statement.getQueryTimeout()).isEqualTo(Constants.DEFAULT_QUERY_TIMEOUT);
+        assertThat(statement.getQueryTimeout()).isEqualTo(0);
     }
 
     @Test
     public void testGetQueryTimeoutDefaultValue() {
-        assertThat(statement.getQueryTimeout()).isEqualTo(Constants.DEFAULT_QUERY_TIMEOUT);
+        assertThat(statement.getQueryTimeout()).isEqualTo(0);
     }
 
     @SneakyThrows
@@ -145,10 +143,11 @@ public class DataCloudStatementTest extends HyperGrpcTestBase {
     public void testGetQueryTimeoutSetByConfig() {
         Properties properties = new Properties();
         properties.setProperty("queryTimeout", Integer.toString(30));
-        connection = Mockito.mock(DataCloudConnection.class);
-        Mockito.when(connection.getClientInfo()).thenReturn(properties);
-        val statement = new DataCloudStatement(connection);
-        assertThat(statement.getQueryTimeout()).isEqualTo(30);
+        try (Connection connection = DataCloudConnection.of(stubProvider, properties)) {
+            try (Statement statement = connection.createStatement()) {
+                assertThat(statement.getQueryTimeout()).isEqualTo(30);
+            }
+        }
     }
 
     @Test
@@ -167,8 +166,8 @@ public class DataCloudStatementTest extends HyperGrpcTestBase {
     @SneakyThrows
     @ValueSource(
             ints = {
-                HYPER_MAX_ROW_LIMIT_BYTE_SIZE + 1,
-                HYPER_MIN_ROW_LIMIT_BYTE_SIZE - 1,
+                RowBased.HYPER_MAX_ROW_LIMIT_BYTE_SIZE + 1,
+                RowBased.HYPER_MIN_ROW_LIMIT_BYTE_SIZE - 1,
                 Integer.MAX_VALUE,
                 Integer.MIN_VALUE
             })
@@ -176,12 +175,12 @@ public class DataCloudStatementTest extends HyperGrpcTestBase {
         assertThatThrownBy(() -> statement.setResultSetConstraints(0, bytes))
                 .hasMessageContaining(
                         "The specified maxBytes (%d) must satisfy the following constraints: %d >= x >= %d",
-                        bytes, HYPER_MIN_ROW_LIMIT_BYTE_SIZE, HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
+                        bytes, RowBased.HYPER_MIN_ROW_LIMIT_BYTE_SIZE, RowBased.HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
     }
 
     @ParameterizedTest
     @SneakyThrows
-    @ValueSource(ints = {HYPER_MAX_ROW_LIMIT_BYTE_SIZE, HYPER_MIN_ROW_LIMIT_BYTE_SIZE, 100000})
+    @ValueSource(ints = {RowBased.HYPER_MAX_ROW_LIMIT_BYTE_SIZE, RowBased.HYPER_MIN_ROW_LIMIT_BYTE_SIZE, 100000})
     public void testConstraintsValid(int bytes) {
         val rows = 123 + bytes;
         statement.setResultSetConstraints(rows, bytes);
@@ -193,26 +192,7 @@ public class DataCloudStatementTest extends HyperGrpcTestBase {
     @Test
     public void testConstraintsDefaults() {
         val stmt = new DataCloudStatement(connection);
-        assertThat(stmt.getTargetMaxBytes()).isEqualTo(HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
-        assertThat(stmt.getTargetMaxRows()).isEqualTo(0);
-    }
-
-    @SneakyThrows
-    @Test
-    public void testConstraintsConfiguration() {
-        val bytes = ThreadLocalRandom.current().nextInt(HYPER_MIN_ROW_LIMIT_BYTE_SIZE, HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
-
-        val properties = new Properties();
-        properties.setProperty(Constants.BYTE_LIMIT, Integer.toString(bytes));
-        val connection = DataCloudConnection.of(new JdbcDriverStubProvider(channel, false), properties);
-
-        val stmt = new DataCloudStatement(connection);
-
-        assertThat(stmt.getTargetMaxBytes()).isEqualTo(bytes);
-
-        stmt.clearResultSetConstraints();
-
-        assertThat(stmt.getTargetMaxBytes()).isEqualTo(HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
+        assertThat(stmt.getTargetMaxBytes()).isEqualTo(0);
         assertThat(stmt.getTargetMaxRows()).isEqualTo(0);
     }
 }

@@ -36,16 +36,18 @@ public class ConnectionQuerySettings {
 
     public static ConnectionQuerySettings of(Properties properties) {
         Map<String, String> settings = new HashMap<>();
-        for (val e : properties.entrySet()) {
-            if (e.getKey().toString().startsWith(HYPER_SETTING)) {
-                settings.put(
-                        e.getKey().toString().substring(HYPER_SETTING.length()),
-                        e.getValue().toString());
-            } else if (e.getKey().toString().startsWith(HYPER_LEGACY_SETTING)) {
-                log.warn("`serverSetting` connection properties are deprecated, use `querySetting` instead.");
-                settings.put(
-                        e.getKey().toString().substring(HYPER_LEGACY_SETTING.length()),
-                        e.getValue().toString());
+        if (properties != null) {
+            for (val e : properties.entrySet()) {
+                if (e.getKey().toString().startsWith(HYPER_SETTING)) {
+                    settings.put(
+                            e.getKey().toString().substring(HYPER_SETTING.length()),
+                            e.getValue().toString());
+                } else if (e.getKey().toString().startsWith(HYPER_LEGACY_SETTING)) {
+                    log.warn("`serverSetting` connection properties are deprecated, use `querySetting` instead.");
+                    settings.put(
+                            e.getKey().toString().substring(HYPER_LEGACY_SETTING.length()),
+                            e.getValue().toString());
+                }
             }
         }
         return new ConnectionQuerySettings(settings);

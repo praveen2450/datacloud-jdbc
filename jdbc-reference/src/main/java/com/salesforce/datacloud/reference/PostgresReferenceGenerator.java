@@ -25,6 +25,7 @@ import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.TimeZone;
 import java.util.stream.Collectors;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -58,6 +59,9 @@ public class PostgresReferenceGenerator {
      */
     public void generateReference() {
         try {
+            // Set the default Java timezone to match PostgreSQL session timezone
+            TimeZone.setDefault(TimeZone.getTimeZone("America/Los_Angeles"));
+
             // Load the PostgreSQL JDBC driver
             Class.forName("org.postgresql.Driver");
             // Load SQL commands from queries.txt file
@@ -84,11 +88,18 @@ public class PostgresReferenceGenerator {
             // Establish connection and generate Reference
             Properties properties = new Properties();
             // Set timezone to Los Angeles for consistent timestamp handling
-            properties.setProperty("timezone", "America/Los_Angeles");
             properties.setProperty("user", DB_USER);
             properties.setProperty("password", DB_PASSWORD);
+            // Note: PostgreSQL JDBC driver doesn't use 'timezone' property
+            // Instead, we need to set the session timezone after connection
             try (Connection connection = DriverManager.getConnection(DB_URL, properties)) {
                 log.info("Connected to PostgreSQL database: {}", DB_URL);
+
+                // Set the session timezone to Los Angeles for consistent timestamp handling
+                try (Statement stmt = connection.createStatement()) {
+                    stmt.execute("SET timezone = 'America/Los_Angeles'");
+                    log.info("Set session timezone to America/Los_Angeles");
+                }
 
                 // Execute SQL commands and collect Reference data
                 List<ReferenceEntry> ReferenceEntries = executeSqlAndCollectReference(connection, sqlCommands);

@@ -49,7 +49,7 @@
     "writable" : true
   } ],
   "returnedValues" : [ [ {
-    "stringValue" : "1000-01-01 01:00:00.0",
+    "stringValue" : "0999-12-31 16:00:00.0",
     "javaClassName" : "java.sql.Timestamp"
   } ] ]
 }, {
@@ -671,6 +671,60 @@
   } ],
   "returnedValues" : [ [ {
     "stringValue" : "1999-01-08 23:59:59.999",
+    "javaClassName" : "java.sql.Timestamp"
+  } ] ]
+}, {
+  "query" : "select timestamp '2024-01-01 17:30:00'",
+  "columnMetadata" : [ {
+    "columnName" : "timestamp",
+    "columnLabel" : "timestamp",
+    "columnType" : 93,
+    "columnTypeName" : "timestamp",
+    "columnDisplaySize" : 29,
+    "precision" : 29,
+    "scale" : 6,
+    "isNullable" : 2,
+    "catalogName" : "",
+    "schemaName" : "",
+    "tableName" : "",
+    "autoIncrement" : false,
+    "caseSensitive" : false,
+    "currency" : false,
+    "definitelyWritable" : false,
+    "readOnly" : false,
+    "searchable" : true,
+    "signed" : false,
+    "writable" : true
+  } ],
+  "returnedValues" : [ [ {
+    "stringValue" : "2024-01-01 17:30:00.0",
+    "javaClassName" : "java.sql.Timestamp"
+  } ] ]
+}, {
+  "query" : "select timestamptz '2024-01-01 17:30:00+00:00'",
+  "columnMetadata" : [ {
+    "columnName" : "timestamptz",
+    "columnLabel" : "timestamptz",
+    "columnType" : 93,
+    "columnTypeName" : "timestamptz",
+    "columnDisplaySize" : 35,
+    "precision" : 35,
+    "scale" : 6,
+    "isNullable" : 2,
+    "catalogName" : "",
+    "schemaName" : "",
+    "tableName" : "",
+    "autoIncrement" : false,
+    "caseSensitive" : false,
+    "currency" : false,
+    "definitelyWritable" : false,
+    "readOnly" : false,
+    "searchable" : true,
+    "signed" : false,
+    "writable" : true
+  } ],
+  "returnedValues" : [ [ {
+    "stringValue" : "2024-01-01 09:30:00.0",
     "javaClassName" : "java.sql.Timestamp"
   } ] ]
 }, {
@@ -2076,5 +2130,59 @@
   "returnedValues" : [ [ {
     "stringValue" : "1",
     "javaClassName" : "java.lang.Integer"
+  } ] ]
+}, {
+  "query" : "select timestamp '2024-01-01 17:30:00'",
+  "columnMetadata" : [ {
+    "columnName" : "timestamp",
+    "columnLabel" : "timestamp",
+    "columnType" : 93,
+    "columnTypeName" : "timestamp",
+    "columnDisplaySize" : 29,
+    "precision" : 29,
+    "scale" : 6,
+    "isNullable" : 2,
+    "catalogName" : "",
+    "schemaName" : "",
+    "tableName" : "",
+    "autoIncrement" : false,
+    "caseSensitive" : false,
+    "currency" : false,
+    "definitelyWritable" : false,
+    "readOnly" : false,
+    "searchable" : true,
+    "signed" : false,
+    "writable" : true
+  } ],
+  "returnedValues" : [ [ {
+    "stringValue" : "2024-01-01 17:30:00.0",
+    "javaClassName" : "java.sql.Timestamp"
+  } ] ]
+}, {
+  "query" : "select timestamptz '2024-01-01 17:30:00+00:00'",
+  "columnMetadata" : [ {
+    "columnName" : "timestamptz",
+    "columnLabel" : "timestamptz",
+    "columnType" : 93,
+    "columnTypeName" : "timestamptz",
+    "columnDisplaySize" : 35,
+    "precision" : 35,
+    "scale" : 6,
+    "isNullable" : 2,
+    "catalogName" : "",
+    "schemaName" : "",
+    "tableName" : "",
+    "autoIncrement" : false,
+    "caseSensitive" : false,
+    "currency" : false,
+    "definitelyWritable" : false,
+    "readOnly" : false,
+    "searchable" : true,
+    "signed" : false,
+    "writable" : true
+  } ],
+  "returnedValues" : [ [ {
+    "stringValue" : "2024-01-01 09:30:00.0",
+    "javaClassName" : "java.sql.Timestamp"
   } ] ]
 } ]

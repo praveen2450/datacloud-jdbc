@@ -67,22 +67,24 @@ public class StreamingResultSet extends AvaticaResultSet implements DataCloudRes
 
     @SneakyThrows
     public static StreamingResultSet of(
-            String queryId, HyperGrpcClientExecutor client, Iterator<QueryResult> iterator) {
+            String queryId,
+            HyperGrpcClientExecutor client,
+            Iterator<QueryResult> iterator,
+            java.util.Properties connectionProperties) {
         try {
             val channel = ExecuteQueryResponseChannel.of(StreamUtilities.toStream(iterator));
             val reader = new ArrowStreamReader(channel, new RootAllocator(ROOT_ALLOCATOR_MB_FROM_V2));
             val schemaRoot = reader.getVectorSchemaRoot();
             val columns = toColumnMetaData(schemaRoot.getSchema().getFields());
 
-            val connectionQuerySettings = ConnectionQuerySettings.of(client.getConnectionProperties());
             // Use session timezone from connection properties instead of system default
-            val timezone = connectionQuerySettings.getSessionTimeZone();
+            val timezone = getSessionTimeZone(connectionProperties);
 
             val state = new QueryState();
             val signature = new Meta.Signature(
                     columns, null, Collections.emptyList(), Collections.emptyMap(), null, Meta.StatementType.SELECT);
             val metadata = new AvaticaResultSetMetaData(null, null, signature);
-            val cursor = new ArrowStreamReaderCursor(reader, client.getConnectionProperties());
+            val cursor = new ArrowStreamReaderCursor(reader, connectionProperties);
             val result =
                     new StreamingResultSet(client, cursor, queryId, null, state, signature, metadata, timezone, null);
             result.execute2(cursor, columns);
@@ -127,5 +129,29 @@ public class StreamingResultSet extends AvaticaResultSet implements DataCloudRes
     @Override
     public int getRow() {
         return cursor.getRowsSeen();
+    }
+
+    /**
+     * Gets the session timezone from connection properties.
+     *
+     * @param connectionProperties Connection properties, may be null
+     * @return Session timezone, falls back to system default if not specified
+     */
+    private static TimeZone getSessionTimeZone(java.util.Properties connectionProperties) {
+        if (connectionProperties == null) {
+            return TimeZone.getDefault();
+        }
+
+        String timezoneProp = connectionProperties.getProperty("querySetting.timezone");
+        if (timezoneProp == null || timezoneProp.trim().isEmpty()) {
+            return TimeZone.getDefault();
+        }
+
+        try {
+            return TimeZone.getTimeZone(timezoneProp);
+        } catch (Exception e) {
+            // If timezone parsing fails, fall back to default
+            return TimeZone.getDefault();
+        }
     }
 }

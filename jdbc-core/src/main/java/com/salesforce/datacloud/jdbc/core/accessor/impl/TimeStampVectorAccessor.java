@@ -17,7 +17,6 @@ package com.salesforce.datacloud.jdbc.core.accessor.impl;
 
 import static com.salesforce.datacloud.jdbc.core.accessor.impl.TimeStampVectorGetter.createGetter;
 
-import com.salesforce.datacloud.jdbc.core.ConnectionQuerySettings;
 import com.salesforce.datacloud.jdbc.core.accessor.QueryJDBCAccessor;
 import com.salesforce.datacloud.jdbc.core.accessor.QueryJDBCAccessorFactory;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
@@ -441,7 +440,18 @@ public class TimeStampVectorAccessor extends QueryJDBCAccessor {
         if (connectionProperties == null) {
             return TimeZone.getDefault();
         }
-        return ConnectionQuerySettings.of(connectionProperties).getSessionTimeZone();
+
+        String timezoneProp = connectionProperties.getProperty("querySetting.timezone");
+        if (timezoneProp == null || timezoneProp.trim().isEmpty()) {
+            return TimeZone.getDefault();
+        }
+
+        try {
+            return TimeZone.getTimeZone(timezoneProp);
+        } catch (Exception e) {
+            // If timezone parsing fails, fall back to default
+            return TimeZone.getDefault();
+        }
     }
 
     private TimeZone getEffectiveTimeZone() {

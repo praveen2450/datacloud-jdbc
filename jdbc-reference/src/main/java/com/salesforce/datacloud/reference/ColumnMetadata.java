@@ -33,7 +33,7 @@ import lombok.extern.jackson.Jacksonized;
 @Jacksonized
 @JsonPropertyOrder({
     "columnName",
-    "columnLabel", 
+    "columnLabel",
     "columnType",
     "columnTypeName",
     "columnDisplaySize",

@@ -39,9 +39,9 @@ class QueryStatusListenerTest extends HyperGrpcTestBase {
     private QueryStatusListener sut(String query, QueryParam.TransferMode mode, Duration timeout) {
         switch (mode) {
             case ASYNC:
-                return AsyncQueryStatusListener.of(query, hyperGrpcClient, QueryTimeout.of(timeout, Duration.ZERO));
+                return AsyncQueryStatusListener.of(query, hyperGrpcClient, QueryTimeout.of(timeout, Duration.ZERO), null);
             case ADAPTIVE:
-                return AdaptiveQueryStatusListener.of(query, hyperGrpcClient, QueryTimeout.of(timeout, Duration.ZERO));
+                return AdaptiveQueryStatusListener.of(query, hyperGrpcClient, QueryTimeout.of(timeout, Duration.ZERO), null);
             default:
                 Assertions.fail("QueryStatusListener mode not supported. mode=" + mode.name());
                 return null;

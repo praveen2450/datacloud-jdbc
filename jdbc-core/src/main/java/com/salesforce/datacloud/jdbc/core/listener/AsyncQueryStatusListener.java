@@ -45,7 +45,13 @@ public class AsyncQueryStatusListener implements QueryStatusListener {
 
     private final QueryTimeout queryTimeout;
 
-    public static AsyncQueryStatusListener of(String query, HyperGrpcClientExecutor client, QueryTimeout queryTimeout)
+    private final java.util.Properties connectionProperties;
+
+    public static AsyncQueryStatusListener of(
+            String query,
+            HyperGrpcClientExecutor client,
+            QueryTimeout queryTimeout,
+            java.util.Properties connectionProperties)
             throws SQLException {
         try {
             val result = client.executeAsyncQuery(query, queryTimeout).next();
@@ -60,6 +66,7 @@ public class AsyncQueryStatusListener implements QueryStatusListener {
                     .queryId(queryId)
                     .client(client)
                     .queryTimeout(queryTimeout)
+                    .connectionProperties(connectionProperties)
                     .build();
         } catch (StatusRuntimeException ex) {
             throw QueryExceptionHandler.createQueryException(query, ex);
@@ -68,7 +75,7 @@ public class AsyncQueryStatusListener implements QueryStatusListener {
 
     @Override
     public DataCloudResultSet generateResultSet() throws DataCloudJDBCException {
-        return StreamingResultSet.of(queryId, client, stream().iterator());
+        return StreamingResultSet.of(queryId, client, stream().iterator(), connectionProperties);
     }
 
     @Override

@@ -34,6 +34,7 @@ import com.salesforce.datacloud.jdbc.core.accessor.impl.VarCharVectorAccessor;
 import com.salesforce.datacloud.jdbc.util.RootAllocatorTestExtension;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Properties;
 import java.util.function.IntSupplier;
 import lombok.SneakyThrows;
 import org.apache.arrow.vector.LargeVarCharVector;
@@ -382,6 +383,31 @@ public class QueryJDBCAccessorFactoryTest {
                     QueryJDBCAccessorFactory.createAccessor(valueVector, GET_CURRENT_ROW, (boolean wasNull) -> {});
 
             assertThat(accessor).isInstanceOf(LargeListVectorAccessor.class);
+        }
+    }
+
+    /**
+     * Test the overloaded createAccessor method with Properties parameter for TimeStampVectorAccessor
+     */
+    @Test
+    @SneakyThrows
+    void testCreateAccessorWithPropertiesForTimeStampVector() {
+        Properties properties = new Properties();
+        properties.setProperty("querySetting.timezone", "America/Los_Angeles");
+
+        try (ValueVector valueVector = rootAllocatorTestExtension.createTimeStampNanoVector(ImmutableList.of())) {
+            QueryJDBCAccessor accessor = QueryJDBCAccessorFactory.createAccessor(
+                    valueVector, GET_CURRENT_ROW, (boolean wasNull) -> {}, properties);
+
+            assertThat(accessor).isInstanceOf(TimeStampVectorAccessor.class);
+        }
+
+        // Test with null properties
+        try (ValueVector valueVector = rootAllocatorTestExtension.createTimeStampNanoVector(ImmutableList.of())) {
+            QueryJDBCAccessor accessor = QueryJDBCAccessorFactory.createAccessor(
+                    valueVector, GET_CURRENT_ROW, (boolean wasNull) -> {}, null);
+
+            assertThat(accessor).isInstanceOf(TimeStampVectorAccessor.class);
         }
     }
 }

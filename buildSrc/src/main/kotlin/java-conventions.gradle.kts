@@ -1,17 +1,7 @@
 plugins {
-    id("base-conventions")
+    id("java-base-conventions")
     `java-library`
-    id("com.diffplug.spotless")
 }
-
-repositories {
-    mavenLocal()
-    maven {
-        url = uri("https://repo.maven.apache.org/maven2/")
-    }
-}
-
-group = "com.salesforce.datacloud"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
@@ -38,50 +28,7 @@ tasks.withType<Javadoc> {
     }
 }
 
-tasks.register("generateVersionProperties") {
-    val resourcesDir = layout.buildDirectory.dir("resources/main")
-    val version = project.version
-    outputs.dir(resourcesDir)
-
-    doLast {
-        val propertiesFile = resourcesDir.get().file("driver-version.properties")
-        propertiesFile.asFile.parentFile.mkdirs()
-        propertiesFile.asFile.writeText("version=$version")
-        logger.lifecycle("version written to driver-version.properties. version=$version")
-    }
-}
-
-tasks.named("compileJava") {
-    dependsOn("generateVersionProperties")
-}
-
-tasks.withType<Test>().configureEach {
-
-    javaLauncher = javaToolchains.launcherFor {
-        languageVersion = JavaLanguageVersion.of(8)
-    }
-
-    useJUnitPlatform()
-
-    testLogging {
-        events("passed", "skipped", "failed")
-        showExceptions = true
-        showStandardStreams = true
-        showStackTraces = true
-    }
-
-    jvmArgs("-Xmx2g", "-Xms512m")
-}
-
 spotless {
-//    ratchetFrom("origin/main")
-
-    format("misc") {
-        target(".gitattributes", ".gitignore")
-        trimTrailingWhitespace()
-        endWithNewline()
-    }
-    
     java {
         target("src/main/java/**/*.java", "src/test/java/**/*.java")
         palantirJavaFormat("2.62.0")

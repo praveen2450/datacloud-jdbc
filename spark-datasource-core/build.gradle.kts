@@ -4,24 +4,30 @@ plugins {
     id("publishing-conventions")
 }
 
-description = "Salesforce Data Cloud Spark DataSource"
-val mavenName: String by extra("Salesforce Data Cloud Spark DataSource")
+description = "Salesforce Data Cloud Spark DataSource core implementation"
+val mavenName: String by extra("Salesforce Data Cloud Spark DataSource Core")
 val mavenDescription: String by extra("${project.description}")
 
 dependencies {
-    // ALIGNED WITH JDBC PATTERN: Core + Shaded dependencies
-    implementation(project(":spark-datasource-core"))
-    implementation(project(":jdbc"))                    // Shaded JDBC (like jdbc depends on jdbc-core)
+    // ALIGNED WITH JDBC-CORE PATTERN: Use compileOnly for gRPC
+    compileOnly(project(":jdbc-grpc"))
+    compileOnly(libs.grpc.stub)
+    compileOnly(libs.grpc.protobuf)
     
-    // Spark dependencies (user provides these)
+    // Core implementation dependencies (like jdbc-core)
+    implementation(project(":jdbc-util"))
+    implementation(libs.slf4j.api)
+    
+    // Spark dependencies
     implementation("org.apache.spark:spark-sql_2.13:3.5.5")
     implementation("org.apache.spark:spark-core_2.13:3.5.5")
 
-    // Test dependencies need actual implementations
-    testImplementation(project(":spark-datasource-core"))
+    // Test dependencies need the actual gRPC implementations
+    testImplementation(project(":jdbc-grpc"))
     testImplementation(testFixtures(project(":jdbc-core")))
-    testImplementation(libs.bundles.grpc.impl)           // For tests only
     testImplementation("org.scalatest:scalatest_3:3.2.19")
+    testImplementation(libs.bundles.grpc.impl)
+    testImplementation(libs.bundles.grpc.testing)
     testRuntimeOnly("org.junit.platform:junit-platform-engine:1.12.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.12.0")
     testRuntimeOnly("org.scalatestplus:junit-5-12_3:3.2.19.0")
@@ -39,5 +45,5 @@ tasks {
 }
 
 tasks.named("compileScala") {
-    dependsOn(":spark-datasource-core:compileScala")
-}
+    dependsOn(":jdbc-grpc:compileJava")
+} 

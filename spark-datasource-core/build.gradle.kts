@@ -14,7 +14,8 @@ dependencies {
     compileOnly(libs.grpc.stub)
     compileOnly(libs.grpc.protobuf)
     
-    // Core implementation dependencies (like jdbc-core)
+    // Core implementation dependencies
+    implementation(project(":jdbc-core"))  // Need this for DataCloudConnection
     implementation(project(":jdbc-util"))
     implementation(libs.slf4j.api)
     
@@ -46,4 +47,5 @@ tasks {
 
 tasks.named("compileScala") {
     dependsOn(":jdbc-grpc:compileJava")
+    dependsOn(":jdbc-core:compileJava")
 } 

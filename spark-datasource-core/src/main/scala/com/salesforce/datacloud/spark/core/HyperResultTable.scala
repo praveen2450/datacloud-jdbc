@@ -14,6 +14,7 @@ import org.apache.spark.sql.connector.read.Statistics
 import scala.util.Using
 import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
+import com.salesforce.datacloud.query.v3.DataCloudQueryStatus
 
 case class HyperResultTable(
     connectionOptions: HyperConnectionOptions,

@@ -13,19 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.salesforce.datacloud.jdbc.core.listener;
+package com.salesforce.datacloud.jdbc.core.fsm;
 
-import com.salesforce.datacloud.jdbc.core.DataCloudResultSet;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
-import java.sql.SQLException;
-import java.util.stream.Stream;
+import com.salesforce.datacloud.query.v3.DataCloudQueryStatus;
+import java.util.Iterator;
 import salesforce.cdp.hyperdb.v1.QueryResult;
 
-@Deprecated
-public interface QueryStatusListener {
-    String getQueryId();
-
-    DataCloudResultSet generateResultSet() throws DataCloudJDBCException;
-
-    Stream<QueryResult> stream() throws SQLException;
+public interface QueryResultIterator extends Iterator<QueryResult>, QueryResultHandle {
+    DataCloudQueryStatus getQueryStatus() throws DataCloudJDBCException;
 }

@@ -20,17 +20,13 @@ import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableMap;
 import com.salesforce.datacloud.jdbc.core.DataCloudConnection;
-import com.salesforce.datacloud.jdbc.core.DataCloudJdbcManagedChannel;
-import com.salesforce.datacloud.jdbc.core.HyperGrpcClientExecutor;
 import com.salesforce.datacloud.jdbc.util.DirectDataCloudConnection;
-import io.grpc.ManagedChannelBuilder;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.file.Paths;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.CountDownLatch;
@@ -42,7 +38,6 @@ import java.util.regex.Pattern;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
-import salesforce.cdp.hyperdb.v1.HyperServiceGrpc;
 
 @Slf4j
 public class HyperServerProcess implements AutoCloseable {
@@ -56,13 +51,21 @@ public class HyperServerProcess implements AutoCloseable {
         this(HyperServerConfig.builder());
     }
 
-    @SneakyThrows
+    public HyperServerProcess(String yamlName) {
+        this(HyperServerConfig.builder(), yamlName);
+    }
+
     public HyperServerProcess(HyperServerConfig.HyperServerConfigBuilder config) {
+        this(config, "hyper.yaml");
+    }
+
+    @SneakyThrows
+    public HyperServerProcess(HyperServerConfig.HyperServerConfigBuilder config, String yamlName) {
         log.info("starting hyperd, this might take a few seconds");
 
         val isWindows = System.getProperty("os.name").toLowerCase().contains("win");
         val executable = new File("../.hyperd/hyperd" + (isWindows ? ".exe" : ""));
-        val yaml = Paths.get(requireNonNull(HyperServerProcess.class.getResource("/hyper.yaml"))
+        val yaml = Paths.get(requireNonNull(HyperServerProcess.class.getResource("/" + yamlName))
                         .toURI())
                 .toFile();
 
@@ -138,14 +141,6 @@ public class HyperServerProcess implements AutoCloseable {
 
     public DataCloudConnection getConnection() {
         return getConnection(ImmutableMap.of());
-    }
-
-    @SneakyThrows
-    public HyperGrpcClientExecutor getRawClient() {
-        val channel = DataCloudJdbcManagedChannel.of(
-                ManagedChannelBuilder.forAddress("127.0.0.1", getPort()).usePlaintext());
-        val stub = HyperServiceGrpc.newBlockingStub(channel.getChannel());
-        return HyperGrpcClientExecutor.of(stub, new HashMap<String, String>());
     }
 
     @SneakyThrows

@@ -19,41 +19,42 @@ import static com.salesforce.datacloud.jdbc.hyper.HyperTestBase.assertEachRowIsT
 import static com.salesforce.datacloud.jdbc.hyper.HyperTestBase.assertWithStatement;
 import static com.salesforce.datacloud.jdbc.hyper.HyperTestBase.getHyperQueryConnection;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import com.salesforce.datacloud.jdbc.hyper.HyperTestBase;
 import io.grpc.StatusRuntimeException;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Pattern;
 import lombok.SneakyThrows;
 import lombok.val;
-import org.assertj.core.api.AssertionsForClassTypes;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 @ExtendWith(HyperTestBase.class)
 public class AsyncStreamingResultSetTest {
+    private static final int size = 64;
 
-    private static final String sql =
-            "select cast(a as numeric(38,18)) a, cast(a as numeric(38,18)) b, cast(a as numeric(38,18)) c from generate_series(1, 1024 * 1024 * 10) as s(a) order by a asc";
+    private static final String sql = String.format(
+            "select cast(a as numeric(38,18)) a, cast(a as numeric(38,18)) b, cast(a as numeric(38,18)) c from generate_series(1, %d) as s(a) order by a asc",
+            size);
 
     @Test
     @SneakyThrows
     public void testThrowsOnNonsenseQueryAsync() {
-        val ex = Assertions.assertThrows(DataCloudJDBCException.class, () -> {
-            try (val connection = getHyperQueryConnection();
-                    val statement = connection.createStatement().unwrap(DataCloudStatement.class)) {
-                val rs = statement.executeAsyncQuery("select * from nonsense");
-                connection.waitForResultsProduced(statement.getQueryId(), Duration.ofSeconds(5));
-                rs.getResultSet().next();
-            }
-        });
-
-        AssertionsForClassTypes.assertThat(ex).hasCauseInstanceOf(StatusRuntimeException.class);
-        val rootCausePattern = Pattern.compile("^[A-Z]+(_[A-Z]+)*: table \"nonsense\" does not exist.*");
-        AssertionsForClassTypes.assertThat(ex.getCause().getMessage()).containsPattern(rootCausePattern);
+        assertThatThrownBy(() -> {
+                    try (val connection = getHyperQueryConnection();
+                            val statement = connection.createStatement().unwrap(DataCloudStatement.class)) {
+                        val rs = statement.executeAsyncQuery("select * from nonsense");
+                        connection.waitForResultsProduced(statement.getQueryId(), Duration.ofSeconds(5));
+                        rs.getResultSet().next();
+                    }
+                })
+                .isInstanceOf(DataCloudJDBCException.class)
+                .hasMessageContaining("Failed to get query status response. queryId=")
+                .hasCauseInstanceOf(StatusRuntimeException.class)
+                .hasRootCauseMessage("FAILED_PRECONDITION: table \"nonsense\" does not exist");
     }
 
     @Test
@@ -74,7 +75,7 @@ public class AsyncStreamingResultSetTest {
                 assertEachRowIsTheSame(rs, expected);
             }
 
-            assertThat(expected.get()).isEqualTo(1024 * 1024 * 10);
+            assertThat(expected.get()).isEqualTo(size);
         });
     }
 

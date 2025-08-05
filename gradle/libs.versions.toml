@@ -29,10 +29,8 @@ plugin-com-google-protobuf = "0.9.4"
 plugin-com-gradleup-shadow = "8.3.6"
 plugin-freefair-lombok = "8.13.1"
 plugin-build-buf = "0.10.2"
-apache-spark = "3.5.6"
-scalatest = "3.2.19"
-scalatestplus-junit = "3.2.19.0"
-jackson-module-scala = "2.19.0"
+
+
 
 [libraries]
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "com-fasterxml-jackson-core-jackson-databind" }
@@ -80,11 +78,8 @@ slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 pgjdbc = { module = "org.postgresql:postgresql", version.ref = "org-postgresql-pgjdbc" }
 protoc = { group = "com.google.protobuf", name = "protoc", version.ref = "protobuf" }
-apache-spark-sql = { module = "org.apache.spark:spark-sql_2.13", version.ref = "apache-spark" }
-apache-spark-core = { module = "org.apache.spark:spark-core_2.13", version.ref = "apache-spark" }
-scalatest-base = { module = "org.scalatest:scalatest_3", version.ref = "scalatest" }
-scalatest-junit = { module = "org.scalatestplus:junit-5-12_3", version.ref = "scalatestplus-junit" }
-jackson-module-scala = { module = "com.fasterxml.jackson.module:jackson-module-scala_2.13", version.ref = "jackson-module-scala" }
+
+
 
 [bundles]
 arrow = ["apache-arrow-vector", "apache-arrow-memory-netty"]

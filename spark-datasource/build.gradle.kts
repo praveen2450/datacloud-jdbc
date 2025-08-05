@@ -23,9 +23,9 @@ dependencies {
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(testFixtures(project(":jdbc-core")))
-    testImplementation(libs.scalatest.base)
+    testImplementation(libs.scalatest)
     testImplementation(libs.bundles.testing)
-    testRuntimeOnly(libs.scalatest.junit)
+    testRuntimeOnly(libs.scalatestplus.junit5)
 }
 
 tasks.named("compileScala") {

@@ -12,7 +12,6 @@ dependencies {
   devPublication(project(":jdbc-http"))
   devPublication(project(":jdbc-util"))
   devPublication(project(":spark-datasource"))
-  devPublication(project(":spark-datasource-core"))
 }
 
 tasks.named("updateDevRepo") {

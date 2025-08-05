@@ -20,29 +20,14 @@ dependencies {
     implementation(libs.slf4j.api)
     
     // Spark dependencies
-    implementation("org.apache.spark:spark-sql_2.13:3.5.5")
-    implementation("org.apache.spark:spark-core_2.13:3.5.5")
+    implementation(libs.bundles.spark)
 
     // Test dependencies need the actual gRPC implementations
     testImplementation(project(":jdbc-grpc"))
     testImplementation(testFixtures(project(":jdbc-core")))
-    testImplementation("org.scalatest:scalatest_3:3.2.19")
     testImplementation(libs.bundles.grpc.impl)
     testImplementation(libs.bundles.grpc.testing)
-    testRuntimeOnly("org.junit.platform:junit-platform-engine:1.12.0")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.12.0")
-    testRuntimeOnly("org.scalatestplus:junit-5-12_3:3.2.19.0")
-}
-
-tasks {
-    test{
-        useJUnitPlatform {
-            includeEngines("scalatest")
-            testLogging {
-                events("passed", "skipped", "failed")
-            }
-        }
-    }
+    testImplementation(libs.bundles.scala.testing)
 }
 
 tasks.named("compileScala") {

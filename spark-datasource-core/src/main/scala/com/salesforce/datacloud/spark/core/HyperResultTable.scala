@@ -53,7 +53,7 @@ case class HyperResultTable(
   }
 }
 
-case class HyperResultScan(
+private case class HyperResultScan(
     connectionOptions: HyperConnectionOptions,
     resultSetId: String,
     schema: StructType,
@@ -87,7 +87,7 @@ case class HyperResultScan(
   )
 }
 
-class ChunkCountMetric extends CustomMetric {
+private class ChunkCountMetric extends CustomMetric {
   override def name(): String = "hyper_result_chunk_count"
   override def description(): String =
     "number of chunks in the result set from Hyper"
@@ -96,7 +96,7 @@ class ChunkCountMetric extends CustomMetric {
   }
 }
 
-class ChunkCountTaskMetric(value: Long) extends CustomTaskMetric {
+private class ChunkCountTaskMetric(value: Long) extends CustomTaskMetric {
   override def name(): String = "hyper_result_chunk_count"
   override def value(): Long = value
 }

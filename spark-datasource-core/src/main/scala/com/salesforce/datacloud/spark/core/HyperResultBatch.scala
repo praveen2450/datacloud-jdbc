@@ -33,7 +33,7 @@ import com.salesforce.datacloud.spark.core.TypeMapping.makeGetters
   *
   * Each partition is one or multiple chunks of a Hyper result.
   */
-case class HyperResultInputPartition(
+private case class HyperResultInputPartition(
     resultSetId: String,
     chunkIndex: Long,
     chunkCount: Long
@@ -79,7 +79,7 @@ case class HyperResultBatch(
   }
 }
 
-class HyperResultPartitionReader extends PartitionReader[InternalRow] {
+private class HyperResultPartitionReader extends PartitionReader[InternalRow] {
   private var getters: Array[JDBCValueGetter] = null;
   private var connection: DataCloudConnection = null;
   private var resultSet: ResultSet = null;

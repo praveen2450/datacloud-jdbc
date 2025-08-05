@@ -26,35 +26,23 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-/**
- * This example uses a locally spawned Hyper instance to demonstrate best practices around connecting to Hyper.
- * This consciously only uses the JDBC API in the core and no helpers (outside of this class) to provide self-contained
- * examples.
- */
 @Slf4j
 @ExtendWith(HyperTestBase.class)
-public class SubmitQueryAndConsumeResultsTest {
-    /**
-     * This example shows how to create a Data Cloud Connection while still having full control over concerns like
-     * authorization and tracing.
-     */
+public class TimeZoneQuerySettingTest {
     @Test
-    public void testBareBonesExecuteQuery() throws SQLException {
-        // The connection properties
+    public void testTimezoneSetting() throws SQLException {
         Properties properties = new Properties();
+        properties.setProperty("querySetting.time_zone", "Asia/Tokyo");
 
-        // You can bring your own gRPC channels that are set up in the way you like (mTLS / Plaintext / ...) and your
-        // own interceptors as well as executors.
         ManagedChannelBuilder<?> channelBuilder = ManagedChannelBuilder.forAddress(
                         "127.0.0.1", HyperTestBase.getInstancePort())
                 .usePlaintext();
 
-        // Use the JDBC Driver interface
         try (DataCloudConnection conn = DataCloudConnection.of(channelBuilder, properties)) {
             try (Statement stmt = conn.createStatement()) {
-                ResultSet rs = stmt.executeQuery("SELECT s FROM generate_series(1,10) s");
+                ResultSet rs = stmt.executeQuery("show timezone;");
                 while (rs.next()) {
-                    log.info("Retrieved value:{}", rs.getLong(1));
+                    log.info("Retrieved value:{}", rs.getString(1));
                 }
             }
         }

@@ -4,28 +4,28 @@ plugins {
     id("publishing-conventions")
 }
 
-description = "Salesforce Data Cloud Spark DataSource"
-val mavenName: String by extra("Salesforce Data Cloud Spark DataSource")
+
+description = "Spark Datasource for Salesforce Data Cloud JDBC"
+val mavenName: String by extra("Spark Datasource for Salesforce Data Cloud JDBC")
 val mavenDescription: String by extra("${project.description}")
 
 dependencies {
-    // ALIGNED WITH JDBC PATTERN: Core + Shaded dependencies
     implementation(project(":spark-datasource-core"))
-    implementation(project(":jdbc"))                    // Shaded JDBC (like jdbc depends on jdbc-core)
-    implementation(project(":jdbc-core"))               // Need for compilation (shaded jdbc only provides runtime)
-    
-    // Spark dependencies (user provides these)
+    implementation(project(":jdbc"))
+    implementation(project(":jdbc-grpc"))
+    implementation(project(":jdbc-core"))
+    implementation(project(":jdbc-util"))
+    implementation(libs.bundles.grpc.impl)
     implementation(libs.bundles.spark)
     
-    // Force compatible Jackson Scala module version to resolve version conflict
+    // Override transitive Jackson Scala module from Spark with newer version
     implementation(libs.jackson.module.scala)
 
-    // Test dependencies need actual implementations
-    testImplementation(project(":spark-datasource-core"))
+    testImplementation(platform(libs.junit.bom))
     testImplementation(testFixtures(project(":jdbc-core")))
-    testImplementation(project(":jdbc-util"))            // For DataCloudJDBCException
-    testImplementation(libs.bundles.grpc.impl)           // For tests only
-    testImplementation(libs.bundles.scala.testing)
+    testImplementation(libs.scalatest.base)
+    testImplementation(libs.bundles.testing)
+    testRuntimeOnly(libs.scalatest.junit)
 }
 
 tasks.named("compileScala") {

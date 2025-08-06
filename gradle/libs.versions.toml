@@ -34,10 +34,10 @@ plugin-build-buf = "0.10.2"
 
 [libraries]
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "com-fasterxml-jackson-core-jackson-databind" }
-jackson-module-scala = { module = "com.fasterxml.jackson.module:jackson-module-scala_2.13", version.ref = "com-fasterxml-jackson-module-jackson-module-scala" }
+jackson-module-scala = { module = "com.fasterxml.jackson.module:jackson-module-scala_2.12", version.ref = "com-fasterxml-jackson-module-jackson-module-scala" }
 guava = { module = "com.google.guava:guava", version.ref = "com-google-guava-guava" }
-spark-sql = { module = "org.apache.spark:spark-sql_2.13", version.ref = "org-apache-spark" }
-spark-core = { module = "org.apache.spark:spark-core_2.13", version.ref = "org-apache-spark" }
+spark-sql = { module = "org.apache.spark:spark-sql_2.12", version.ref = "org-apache-spark" }
+spark-core = { module = "org.apache.spark:spark-core_2.12", version.ref = "org-apache-spark" }
 scalatest = { module = "org.scalatest:scalatest_3", version.ref = "org-scalatest" }
 junit-platform-engine = { module = "org.junit.platform:junit-platform-engine", version.ref = "org-junit-platform" }
 junit-platform-launcher-test = { module = "org.junit.platform:junit-platform-launcher", version.ref = "org-junit-platform" }

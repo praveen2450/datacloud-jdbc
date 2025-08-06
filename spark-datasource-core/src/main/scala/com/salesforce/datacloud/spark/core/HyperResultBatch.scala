@@ -94,7 +94,7 @@ private class HyperResultPartitionReader extends PartitionReader[InternalRow] {
   ) = {
     this()
     mutableRow = new SpecificInternalRow(
-      schema.fields.map(x => x.dataType).toIndexedSeq
+      schema.fields.map(_.dataType).toArray.toSeq
     )
     connection = connectionOptions.createConnection()
     resultSet = this.connection.getChunkBasedResultSet(

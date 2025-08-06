@@ -620,8 +620,9 @@ object HyperConnectionOptions {
       host = "127.0.0.1"
     }
 
-    // Use Integer.parseInt for Scala 2.12/2.13 compatibility
-    val port = Integer.parseInt(options.get("port"))
+    // Use Integer.parseInt for Scala 2.12 compatibility
+    val portStr = options.get("port")
+    val port = if (portStr != null) Integer.parseInt(portStr) else 443
 
     // Determine if TLS should be used
     val useTls = Option(options.get("use_tls"))

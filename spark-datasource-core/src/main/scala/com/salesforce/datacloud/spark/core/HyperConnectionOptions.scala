@@ -1,30 +1,41 @@
 package com.salesforce.datacloud.spark.core
 
 import java.util.Properties
-import com.salesforce.datacloud.jdbc.core.{DataCloudConnection, DataCloudJdbcManagedChannel}
+import com.salesforce.datacloud.jdbc.core.{
+  DataCloudConnection,
+  DataCloudJdbcManagedChannel
+}
 import io.grpc.ManagedChannelBuilder
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import java.io.{File, FileInputStream}
 import java.security.KeyStore
 import javax.net.ssl.{TrustManagerFactory, KeyManagerFactory}
-import io.grpc.{ClientInterceptor, MethodDescriptor, CallOptions, Channel, ClientCall, ForwardingClientCall, Metadata}
+import io.grpc.{
+  ClientInterceptor,
+  MethodDescriptor,
+  CallOptions,
+  Channel,
+  ClientCall,
+  ForwardingClientCall,
+  Metadata
+}
 import scala.collection.JavaConverters._
 
 case class HyperConnectionOptions(
-                                   host: String,
-                                   port: Int,
-                                   useTls: Boolean = false,
-                                   audience: Option[String] = None,
-                                   // Unified SSL configuration - support both approaches
-                                   sslMode: String = "auto", // "auto", "jks", "pem", "disabled"
-                                   keystorePath: Option[String] = None,
-                                   keystorePassword: Option[String] = None,
-                                   certPath: Option[String] = None,
-                                   keyPath: Option[String] = None,
-                                   caCertPath: Option[String] = None,
-                                   tenantId: Option[String] = None,
-                                   coreTenantId: Option[String] = None
-                                 ) {
+    host: String,
+    port: Int,
+    useTls: Boolean = false,
+    audience: Option[String] = None,
+    // Unified SSL configuration - support both approaches
+    sslMode: String = "auto", // "auto", "jks", "pem", "disabled"
+    keystorePath: Option[String] = None,
+    keystorePassword: Option[String] = None,
+    certPath: Option[String] = None,
+    keyPath: Option[String] = None,
+    caCertPath: Option[String] = None,
+    tenantId: Option[String] = None,
+    coreTenantId: Option[String] = None
+) {
 
   def createConnection(): DataCloudConnection = {
     // 🔍 Debug: Print all connection options
@@ -46,7 +57,9 @@ case class HyperConnectionOptions(
       val tenantInterceptor = createTenantHeaderInterceptor()
       baseChannelBuilder.intercept(tenantInterceptor)
     } else {
-      println("⚠️  No tenant information provided - this may cause RBAC issues!")
+      println(
+        "⚠️  No tenant information provided - this may cause RBAC issues!"
+      )
       baseChannelBuilder
     }
 
@@ -72,7 +85,9 @@ case class HyperConnectionOptions(
       println(s"📋 Setting coreTenantId property: ${ctid}")
     }
 
-    println(s"🏗️  Creating DataCloudConnection with ${properties.size()} properties")
+    println(
+      s"🏗️  Creating DataCloudConnection with ${properties.size()} properties"
+    )
 
     DataCloudConnection.of(channelBuilder, properties)
   }
@@ -127,7 +142,10 @@ case class HyperConnectionOptions(
           caCertPath.getOrElse("/etc/identity/ca/cacerts.pem")
         )
 
-        if (new File(pemPaths._1).exists() && new File(pemPaths._2).exists() && new File(pemPaths._3).exists()) {
+        if (
+          new File(pemPaths._1).exists() && new File(pemPaths._2)
+            .exists() && new File(pemPaths._3).exists()
+        ) {
           println("📄 Found PEM certificates - using PEM mode")
           createPemBasedSslChannelBuilder()
         } else {
@@ -140,7 +158,8 @@ case class HyperConnectionOptions(
   private def createJksBasedSslChannelBuilder(): ManagedChannelBuilder[_] = {
     try {
       // Production keystore factory with configurable paths
-      val dksFactory = new ProductionKeyStoreFactory(keystorePath, keystorePassword)
+      val dksFactory =
+        new ProductionKeyStoreFactory(keystorePath, keystorePassword)
       val dks = dksFactory.getInstance()
 
       // Get KeyManager from JKS (for client authentication)
@@ -157,7 +176,9 @@ case class HyperConnectionOptions(
         createNettyChannelBuilder(sslContext)
       } else {
         // Traditional JKS mode: use keystore for both client auth AND server verification
-        println("🔒 Pure JKS mode: keystore for both client auth and server verification")
+        println(
+          "🔒 Pure JKS mode: keystore for both client auth and server verification"
+        )
         val tmf = dks.getTrustManagerFactory()
         val sslContext = createSslContext(tmf, kmf)
         createNettyChannelBuilder(sslContext)
@@ -180,16 +201,21 @@ case class HyperConnectionOptions(
     } catch {
       case e: Exception =>
         println(s"⚠️  PEM-based SSL setup failed: ${e.getMessage}")
-        println("📋 Falling back to basic TLS (may fail without proper certificates)")
+        println(
+          "📋 Falling back to basic TLS (may fail without proper certificates)"
+        )
         ManagedChannelBuilder.forAddress(host, port).useTransportSecurity()
     }
   }
 
   private def createPemBasedSslContext(): Any = {
     // PEM file paths (configurable or defaults)
-    val CERT_CHAIN_FILE = certPath.getOrElse("/etc/identity/client/certificates/client.pem")
-    val PRIVATE_KEY_FILE = keyPath.getOrElse("/etc/identity/client/keys/client-key.pem")
-    val TRUST_CERT_COLLECTION_FILE = caCertPath.getOrElse("/etc/identity/ca/cacerts.pem")
+    val CERT_CHAIN_FILE =
+      certPath.getOrElse("/etc/identity/client/certificates/client.pem")
+    val PRIVATE_KEY_FILE =
+      keyPath.getOrElse("/etc/identity/client/keys/client-key.pem")
+    val TRUST_CERT_COLLECTION_FILE =
+      caCertPath.getOrElse("/etc/identity/ca/cacerts.pem")
 
     val certChainFile = new File(CERT_CHAIN_FILE)
     val privateKeyFile = new File(PRIVATE_KEY_FILE)
@@ -197,13 +223,19 @@ case class HyperConnectionOptions(
 
     // Verify files exist
     if (!certChainFile.exists()) {
-      throw new java.io.FileNotFoundException(s"Certificate chain file not found: ${CERT_CHAIN_FILE}")
+      throw new java.io.FileNotFoundException(
+        s"Certificate chain file not found: ${CERT_CHAIN_FILE}"
+      )
     }
     if (!privateKeyFile.exists()) {
-      throw new java.io.FileNotFoundException(s"Private key file not found: ${PRIVATE_KEY_FILE}")
+      throw new java.io.FileNotFoundException(
+        s"Private key file not found: ${PRIVATE_KEY_FILE}"
+      )
     }
     if (!trustCertFile.exists()) {
-      throw new java.io.FileNotFoundException(s"Trust certificate file not found: ${TRUST_CERT_COLLECTION_FILE}")
+      throw new java.io.FileNotFoundException(
+        s"Trust certificate file not found: ${TRUST_CERT_COLLECTION_FILE}"
+      )
     }
 
     println(s"📁 Using PEM certificates:")
@@ -211,70 +243,121 @@ case class HyperConnectionOptions(
     println(s"   • Private key: ${PRIVATE_KEY_FILE}")
     println(s"   • Trust certs: ${TRUST_CERT_COLLECTION_FILE}")
 
-    // Use reflection for shaded GrpcSslContexts.forClient().keyManager(certFile, keyFile).trustManager(trustFile).build()
-    val grpcSslContextsClass = Class.forName("com.salesforce.datacloud.spark.shaded.io.grpc.netty.GrpcSslContexts")
-    val forClientMethod = grpcSslContextsClass.getMethod("forClient")
-    val sslContextBuilder = forClientMethod.invoke(null)
+    try {
+      // Use reflection for shaded GrpcSslContexts.forClient().keyManager(certFile, keyFile).trustManager(trustFile).build()
+      val grpcSslContextsClass = Class.forName(
+        "com.salesforce.datacloud.shaded.io.grpc.netty.GrpcSslContexts"
+      )
+      val forClientMethod = grpcSslContextsClass.getMethod("forClient")
+      val sslContextBuilder = forClientMethod.invoke(null)
 
-    val builderClass = sslContextBuilder.getClass
+      val builderClass = sslContextBuilder.getClass
+      println(s"🔧 SSL Context Builder class: ${builderClass.getName}")
 
-    // keyManager(certChainFile, privateKeyFile)
-    val keyManagerMethod = builderClass.getMethod("keyManager", classOf[File], classOf[File])
-    keyManagerMethod.invoke(sslContextBuilder, certChainFile.asInstanceOf[Object], privateKeyFile.asInstanceOf[Object])
+      // CRITICAL FIX: Set trustManager FIRST, then keyManager
+      // This ensures the trust store is properly configured before client certificates
+      println("🔒 Setting up trust manager...")
+      val trustManagerMethod =
+        builderClass.getMethod("trustManager", classOf[File])
+      trustManagerMethod.invoke(
+        sslContextBuilder,
+        trustCertFile.asInstanceOf[Object]
+      )
+      println("✅ Trust manager configured")
 
-    // trustManager(trustCertFile)
-    val trustManagerMethod = builderClass.getMethod("trustManager", classOf[File])
-    trustManagerMethod.invoke(sslContextBuilder, trustCertFile.asInstanceOf[Object])
+      // Then set up client certificate authentication
+      println("🔑 Setting up key manager...")
+      val keyManagerMethod =
+        builderClass.getMethod("keyManager", classOf[File], classOf[File])
+      keyManagerMethod.invoke(
+        sslContextBuilder,
+        certChainFile.asInstanceOf[Object],
+        privateKeyFile.asInstanceOf[Object]
+      )
+      println("✅ Key manager configured")
 
-    // build()
-    val buildMethod = builderClass.getMethod("build")
-    buildMethod.invoke(sslContextBuilder)
+      // build()
+      println("🏗️  Building SSL context...")
+      val buildMethod = builderClass.getMethod("build")
+      val sslContext = buildMethod.invoke(sslContextBuilder)
+      println(s"✅ SSL context created: ${sslContext.getClass.getName}")
+      
+      sslContext
+      
+    } catch {
+      case e: Exception =>
+        println(s"❌ SSL Context creation failed: ${e.getMessage}")
+        e.printStackTrace()
+        throw e
+    }
   }
 
-  private def createMixedSslContext(keyManagerFactory: KeyManagerFactory, caCertPemPath: String): Any = {
+  private def createMixedSslContext(
+      keyManagerFactory: KeyManagerFactory,
+      caCertPemPath: String
+  ): Any = {
     println(s"🔗 Creating mixed SSL context:")
     println(s"   • KeyManager: From JKS keystore")
     println(s"   • TrustManager: From PEM CA file (${caCertPemPath})")
 
     val caCertFile = new File(caCertPemPath)
     if (!caCertFile.exists()) {
-      throw new java.io.FileNotFoundException(s"CA certificate file not found: ${caCertPemPath}")
+      throw new java.io.FileNotFoundException(
+        s"CA certificate file not found: ${caCertPemPath}"
+      )
     }
 
     // Use reflection for shaded GrpcSslContexts.forClient()
-    val grpcSslContextsClass = Class.forName("com.salesforce.datacloud.spark.shaded.io.grpc.netty.GrpcSslContexts")
+    val grpcSslContextsClass = Class.forName(
+              "com.salesforce.datacloud.shaded.io.grpc.netty.GrpcSslContexts"
+    )
     val forClientMethod = grpcSslContextsClass.getMethod("forClient")
     val sslContextBuilder = forClientMethod.invoke(null)
 
     val builderClass = sslContextBuilder.getClass
 
     // keyManager(KeyManagerFactory) - from JKS
-    val keyManagerFactoryMethod = builderClass.getMethod("keyManager", classOf[KeyManagerFactory])
-    keyManagerFactoryMethod.invoke(sslContextBuilder, keyManagerFactory.asInstanceOf[Object])
+    val keyManagerFactoryMethod =
+      builderClass.getMethod("keyManager", classOf[KeyManagerFactory])
+    keyManagerFactoryMethod.invoke(
+      sslContextBuilder,
+      keyManagerFactory.asInstanceOf[Object]
+    )
 
     // trustManager(File) - from PEM CA cert file
-    val trustManagerMethod = builderClass.getMethod("trustManager", classOf[File])
-    trustManagerMethod.invoke(sslContextBuilder, caCertFile.asInstanceOf[Object])
+    val trustManagerMethod =
+      builderClass.getMethod("trustManager", classOf[File])
+    trustManagerMethod.invoke(
+      sslContextBuilder,
+      caCertFile.asInstanceOf[Object]
+    )
 
     // build()
     val buildMethod = builderClass.getMethod("build")
     buildMethod.invoke(sslContextBuilder)
   }
 
-  private def createSslContext(tmf: TrustManagerFactory, kmf: KeyManagerFactory): Any = {
+  private def createSslContext(
+      tmf: TrustManagerFactory,
+      kmf: KeyManagerFactory
+  ): Any = {
     // Use reflection for shaded GrpcSslContexts.forClient().trustManager(tmf).keyManager(kmf).build()
-    val grpcSslContextsClass = Class.forName("com.salesforce.datacloud.spark.shaded.io.grpc.netty.GrpcSslContexts")
+    val grpcSslContextsClass = Class.forName(
+              "com.salesforce.datacloud.shaded.io.grpc.netty.GrpcSslContexts"
+    )
     val forClientMethod = grpcSslContextsClass.getMethod("forClient")
     val sslContextBuilder = forClientMethod.invoke(null)
 
     val builderClass = sslContextBuilder.getClass
 
     // trustManager(tmf)
-    val trustManagerMethod = builderClass.getMethod("trustManager", classOf[TrustManagerFactory])
+    val trustManagerMethod =
+      builderClass.getMethod("trustManager", classOf[TrustManagerFactory])
     trustManagerMethod.invoke(sslContextBuilder, tmf.asInstanceOf[Object])
 
     // keyManager(kmf)
-    val keyManagerMethod = builderClass.getMethod("keyManager", classOf[KeyManagerFactory])
+    val keyManagerMethod =
+      builderClass.getMethod("keyManager", classOf[KeyManagerFactory])
     keyManagerMethod.invoke(sslContextBuilder, kmf.asInstanceOf[Object])
 
     // build()
@@ -282,22 +365,40 @@ case class HyperConnectionOptions(
     buildMethod.invoke(sslContextBuilder)
   }
 
-  private def createNettyChannelBuilder(sslContext: Any): ManagedChannelBuilder[_] = {
+  private def createNettyChannelBuilder(
+      sslContext: Any
+  ): ManagedChannelBuilder[_] = {
     // Use reflection for NettyChannelBuilder.forAddress(host, port).negotiationType(NegotiationType.TLS).sslContext(sslContext)
-    val nettyChannelBuilderClass = Class.forName("com.salesforce.datacloud.spark.shaded.io.grpc.netty.NettyChannelBuilder")
-    val forAddressMethod = nettyChannelBuilderClass.getMethod("forAddress", classOf[String], classOf[Int])
+    val nettyChannelBuilderClass = Class.forName(
+              "com.salesforce.datacloud.shaded.io.grpc.netty.NettyChannelBuilder"
+    )
+    val forAddressMethod = nettyChannelBuilderClass.getMethod(
+      "forAddress",
+      classOf[String],
+      classOf[Int]
+    )
     val nettyBuilder = forAddressMethod.invoke(null, host, Int.box(port))
 
     // negotiationType(NegotiationType.TLS)
-    val negotiationTypeClass = Class.forName("com.salesforce.datacloud.spark.shaded.io.grpc.netty.NegotiationType")
+    val negotiationTypeClass = Class.forName(
+              "com.salesforce.datacloud.shaded.io.grpc.netty.NegotiationType"
+    )
     val tlsField = negotiationTypeClass.getField("TLS")
     val tlsValue = tlsField.get(null)
 
-    val negotiationTypeMethod = nettyChannelBuilderClass.getMethod("negotiationType", negotiationTypeClass)
+    val negotiationTypeMethod = nettyChannelBuilderClass.getMethod(
+      "negotiationType",
+      negotiationTypeClass
+    )
     negotiationTypeMethod.invoke(nettyBuilder, tlsValue.asInstanceOf[Object])
 
     // sslContext(sslContext)
-    val sslContextMethod = nettyChannelBuilderClass.getMethod("sslContext", Class.forName("com.salesforce.datacloud.spark.shaded.io.netty.handler.ssl.SslContext"))
+    val sslContextMethod = nettyChannelBuilderClass.getMethod(
+      "sslContext",
+      Class.forName(
+        "com.salesforce.datacloud.shaded.io.netty.handler.ssl.SslContext"
+      )
+    )
     sslContextMethod.invoke(nettyBuilder, sslContext.asInstanceOf[Object])
 
     nettyBuilder.asInstanceOf[ManagedChannelBuilder[_]]
@@ -307,18 +408,20 @@ case class HyperConnectionOptions(
     // Create a simple header interceptor using the HeaderMutatingClientInterceptor pattern
     new ClientInterceptor {
       override def interceptCall[ReqT, RespT](
-                                               method: MethodDescriptor[ReqT, RespT],
-                                               callOptions: CallOptions,
-                                               next: Channel
-                                             ): ClientCall[ReqT, RespT] = {
+          method: MethodDescriptor[ReqT, RespT],
+          callOptions: CallOptions,
+          next: Channel
+      ): ClientCall[ReqT, RespT] = {
 
         val nextCall = next.newCall(method, callOptions)
 
-        new ForwardingClientCall.SimpleForwardingClientCall[ReqT, RespT](nextCall) {
+        new ForwardingClientCall.SimpleForwardingClientCall[ReqT, RespT](
+          nextCall
+        ) {
           override def start(
-                              responseListener: ClientCall.Listener[RespT],
-                              headers: Metadata
-                            ): Unit = {
+              responseListener: ClientCall.Listener[RespT],
+              headers: Metadata
+          ): Unit = {
             println(s"🚀 Intercepting gRPC call: ${method.getFullMethodName}")
 
             // Add tenant headers
@@ -357,19 +460,21 @@ case class HyperConnectionOptions(
   }
 }
 
-/**
- * Production keystore factory that mimics your existing DynamicKeyStoreFactory pattern
- */
+/** Production keystore factory that mimics your existing DynamicKeyStoreFactory
+  * pattern
+  */
 class ProductionKeyStoreFactory(
-                                 private val defaultKeystorePath: Option[String],
-                                 private val defaultKeystorePassword: Option[String]
-                               ) {
+    private val defaultKeystorePath: Option[String],
+    private val defaultKeystorePassword: Option[String]
+) {
   private val DEFAULT_PASSWORD_KEY = "keystore.defaultPass"
-  private val FALLBACK_PASSWORD = "changeit" // Fallback if properties not available
+  private val FALLBACK_PASSWORD =
+    "changeit" // Fallback if properties not available
 
   private def readDefaultPasswordFromConfig(): String = {
     try {
-      val inputStream = getClass.getClassLoader.getResourceAsStream("application.properties")
+      val inputStream =
+        getClass.getClassLoader.getResourceAsStream("application.properties")
       if (inputStream != null) {
         val properties = new java.util.Properties()
         properties.load(inputStream)
@@ -383,7 +488,9 @@ class ProductionKeyStoreFactory(
       }
     } catch {
       case e: Exception =>
-        println(s"⚠️  Failed to read password from application.properties: ${e.getMessage}")
+        println(
+          s"⚠️  Failed to read password from application.properties: ${e.getMessage}"
+        )
     }
 
     println(s"📋 Using fallback keystore password")
@@ -391,7 +498,8 @@ class ProductionKeyStoreFactory(
   }
 
   def getInstance(): ProductionKeyStore = {
-    val password = defaultKeystorePassword.getOrElse(readDefaultPasswordFromConfig())
+    val password =
+      defaultKeystorePassword.getOrElse(readDefaultPasswordFromConfig())
 
     // If explicit path provided, use it
     if (defaultKeystorePath.isDefined) {
@@ -400,13 +508,15 @@ class ProductionKeyStoreFactory(
         println(s"📁 Using explicit keystore path: ${defaultKeystorePath.get}")
         return loadKeystore(keystoreFile, password)
       } else {
-        println(s"⚠️  Explicit keystore path not found: ${defaultKeystorePath.get}")
+        println(
+          s"⚠️  Explicit keystore path not found: ${defaultKeystorePath.get}"
+        )
       }
     }
 
     // Use pure Java approach - no Scala collections, try standard paths
-    val keystorePath1 = "/etc/pki-agent/keystore/client.jks"  // EMR on EKS
-    val keystorePath2 = "/tmp/client.jks"                     // EMR on EC2
+    val keystorePath1 = "/etc/pki-agent/keystore/client.jks" // EMR on EKS
+    val keystorePath2 = "/tmp/client.jks" // EMR on EC2
 
     // Check first path
     val keystoreFile1 = new File(keystorePath1)
@@ -416,7 +526,9 @@ class ProductionKeyStoreFactory(
         return loadKeystore(keystoreFile1, password)
       } catch {
         case e: Exception =>
-          println(s"⚠️  Failed to load keystore from ${keystorePath1}: ${e.getMessage}")
+          println(
+            s"⚠️  Failed to load keystore from ${keystorePath1}: ${e.getMessage}"
+          )
       }
     } else {
       println(s"📋 Keystore not found: ${keystorePath1}")
@@ -430,31 +542,45 @@ class ProductionKeyStoreFactory(
         return loadKeystore(keystoreFile2, password)
       } catch {
         case e: Exception =>
-          println(s"⚠️  Failed to load keystore from ${keystorePath2}: ${e.getMessage}")
+          println(
+            s"⚠️  Failed to load keystore from ${keystorePath2}: ${e.getMessage}"
+          )
       }
     } else {
       println(s"📋 Keystore not found: ${keystorePath2}")
     }
 
-    throw new IllegalStateException(s"Unable to initialize keystore for SSL context. Checked paths: ${keystorePath1}, ${keystorePath2}")
+    throw new IllegalStateException(
+      s"Unable to initialize keystore for SSL context. Checked paths: ${keystorePath1}, ${keystorePath2}"
+    )
   }
 
-  private def loadKeystore(keystoreFile: File, password: String): ProductionKeyStore = {
+  private def loadKeystore(
+      keystoreFile: File,
+      password: String
+  ): ProductionKeyStore = {
     val keystore = KeyStore.getInstance(KeyStore.getDefaultType)
     val inputStream = new FileInputStream(keystoreFile)
     try {
       keystore.load(inputStream, password.toCharArray)
 
       // Create managers (like your DynamicKeyStoreFactory)
-      val keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm)
+      val keyManagerFactory =
+        KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm)
       keyManagerFactory.init(keystore, password.toCharArray)
 
-      val trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm)
+      val trustManagerFactory =
+        TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm)
       trustManagerFactory.init(keystore)
 
       println(s"✅ Successfully loaded keystore with ${keystore.size()} entries")
 
-      new ProductionKeyStore(keystore, password.toCharArray, keyManagerFactory, trustManagerFactory)
+      new ProductionKeyStore(
+        keystore,
+        password.toCharArray,
+        keyManagerFactory,
+        trustManagerFactory
+      )
 
     } finally {
       inputStream.close()
@@ -462,19 +588,19 @@ class ProductionKeyStoreFactory(
   }
 }
 
-/**
- * Production keystore that follows your existing DynamicKeyStore pattern
- */
+/** Production keystore that follows your existing DynamicKeyStore pattern
+  */
 class ProductionKeyStore(
-                          private val keystore: KeyStore,
-                          private val password: Array[Char],
-                          private val keyManagerFactory: KeyManagerFactory,
-                          private val trustManagerFactory: TrustManagerFactory
-                        ) {
+    private val keystore: KeyStore,
+    private val password: Array[Char],
+    private val keyManagerFactory: KeyManagerFactory,
+    private val trustManagerFactory: TrustManagerFactory
+) {
 
   def getKeystore(): KeyStore = keystore
 
-  def getTruststore(): KeyStore = keystore // Same store for both (like your implementation)
+  def getTruststore(): KeyStore =
+    keystore // Same store for both (like your implementation)
 
   def getKeyPassword(): Array[Char] = password
 
@@ -487,8 +613,8 @@ class ProductionKeyStore(
 
 object HyperConnectionOptions {
   def fromOptions(
-                   options: java.util.Map[String, String]
-                 ): HyperConnectionOptions = {
+      options: java.util.Map[String, String]
+  ): HyperConnectionOptions = {
     var host = options.get("host")
     if (host == null) {
       host = "127.0.0.1"
@@ -531,9 +657,18 @@ object HyperConnectionOptions {
     val coreTenantId = Option(options.get("core_tenant_id"))
 
     HyperConnectionOptions(
-      host, port, useTls, audience, sslMode,
-      keystorePath, keystorePassword, certPath, keyPath, caCertPath,
-      tenantId, coreTenantId
+      host,
+      port,
+      useTls,
+      audience,
+      sslMode,
+      keystorePath,
+      keystorePassword,
+      certPath,
+      keyPath,
+      caCertPath,
+      tenantId,
+      coreTenantId
     )
   }
 }

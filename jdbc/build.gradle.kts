@@ -94,11 +94,6 @@ val shadedJar = tasks.register<com.github.jengelman.gradle.plugins.shadow.tasks.
     shouldRunAfter(tasks.jar)
 }
 
-// This is the base JAR with an "original" classifier, it's not shaded and should become the default JAR after making DBeaver use the shaded classifier
-tasks.jar {
-    archiveClassifier = "original"
-}
-
 tasks.named("compileJava") {
     dependsOn(":jdbc-core:build")
 }

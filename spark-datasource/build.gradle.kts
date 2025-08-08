@@ -108,6 +108,11 @@ val shadedJar = tasks.register<com.github.jengelman.gradle.plugins.shadow.tasks.
     shouldRunAfter(tasks.jar)
 }
 
+// This is the base JAR with an "original" classifier, it's not shaded 
+tasks.jar {
+    archiveClassifier = "original"
+}
+
 tasks.named("compileScala") {
     dependsOn(":spark-datasource-core:compileScala")
     dependsOn(":jdbc-core:compileJava")

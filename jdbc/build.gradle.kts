@@ -25,7 +25,7 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.bundles.testing)
     testImplementation(libs.bundles.mocking)
-    testImplementation(libs.guava)                      // For Guava collections in tests
+    testImplementation(libs.guava)                      // Guava collections in tests
 }
 
 // Common shading configuration to be reused

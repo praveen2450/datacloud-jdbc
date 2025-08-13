@@ -24,8 +24,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Unit tests for {@link DirectDataCloudConnection}.
@@ -91,7 +89,7 @@ class DirectDataCloudConnectionTest {
             // Provide certificate paths that don't exist - should get file validation errors
             properties.setProperty("client_cert_path", "/nonexistent/client.pem");
             properties.setProperty("client_key_path", "/nonexistent/client-key.pem");
-            
+
             assertThatThrownBy(() -> DirectDataCloudConnection.of(TEST_URL, properties))
                     .isInstanceOf(DataCloudJDBCException.class)
                     .satisfies(ex -> {
@@ -106,14 +104,15 @@ class DirectDataCloudConnectionTest {
             // Provide only client cert without key - should get validation error
             properties.setProperty("client_cert_path", "/some/client.pem");
             // Missing client_key_path
-            
+
             assertThatThrownBy(() -> DirectDataCloudConnection.of(TEST_URL, properties))
                     .satisfies(ex -> {
                         // Should get either IllegalArgumentException for cert/key mismatch
                         // or DataCloudJDBCException for URL validation (depending on execution order)
                         assertThat(ex).isInstanceOfAny(IllegalArgumentException.class, DataCloudJDBCException.class);
                         if (ex instanceof IllegalArgumentException) {
-                            assertThat(ex.getMessage()).contains("Client certificate path provided without client key path");
+                            assertThat(ex.getMessage())
+                                    .contains("Client certificate path provided without client key path");
                         }
                         // If it's a URL validation error, that's also acceptable for this test
                     });

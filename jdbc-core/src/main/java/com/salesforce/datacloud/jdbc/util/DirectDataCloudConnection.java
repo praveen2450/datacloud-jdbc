@@ -35,46 +35,46 @@ import javax.net.ssl.TrustManagerFactory;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Direct gRPC connection utility supporting multiple SSL/TLS modes.
+ * Direct gRPC connection utility with automatic SSL/TLS detection.
  *
- * <p>SSL modes follow industry standards similar to:
+ * <p>SSL configuration is detected based on provided properties:
  * <ul>
- *   <li>PostgreSQL JDBC: sslmode="disable|require|verify-full"</li>
- *   <li>MySQL Connector/J: sslMode="DISABLED|REQUIRED|VERIFY_IDENTITY"</li>
+ *   <li>No SSL properties: SSL with system truststore (default)</li>
+ *   <li>Trust properties only: One-sided TLS (server authentication)</li>
+ *   <li>Trust + client cert properties: Two-sided TLS (mutual authentication)</li>
+ * </ul>
+ *
+ * <p>Supported trust verification formats:
+ * <ul>
+ *   <li>JKS truststore: truststore_path + truststore_password</li>
+ *   <li>PEM CA certificate: ca_cert_path</li>
+ *   <li>System truststore: automatic fallback</li>
+ * </ul>
+ *
+ * <p>Supported property combinations:
+ * <ul>
+ *   <li>truststore_* → one-sided TLS</li>
+ *   <li>ca_cert_path → one-sided TLS</li>
+ *   <li>truststore_* + client_cert_* → two-sided TLS</li>
+ *   <li>ca_cert_path + client_cert_* → two-sided TLS</li>
  * </ul>
  */
 @Slf4j
 public final class DirectDataCloudConnection {
     public static final String DIRECT = "direct";
 
-    // SSL mode property - follows PostgreSQL and MySQL naming conventions
-    public static final String SSL_MODE = "ssl_mode";
+    // property to disable SSL (for testing only, we might change the implementation in future)
+    private static final String SSL_DISABLED = "ssl_disabled";
 
-    // JKS keystore properties (for REQUIRED mode) - similar to MySQL Connector/J
+    // JKS truststore properties - for trust verification
     public static final String TRUSTSTORE_PATH = "truststore_path";
     public static final String TRUSTSTORE_PASSWORD = "truststore_password";
     public static final String TRUSTSTORE_TYPE = "truststore_type";
 
-    // PEM certificate properties (for VERIFY_FULL mode) - similar to PostgreSQL
+    // PEM certificate properties - for trust verification and client authentication
     public static final String CLIENT_CERT_PATH = "client_cert_path";
     public static final String CLIENT_KEY_PATH = "client_key_path";
     public static final String CA_CERT_PATH = "ca_cert_path";
-
-    /**
-     * SSL connection modes following industry standards.
-     *
-     * <p>Similar to PostgreSQL sslmode and MySQL sslMode:
-     * <ul>
-     *   <li>DISABLED: No encryption (like PostgreSQL "disable")</li>
-     *   <li>REQUIRED: SSL with server auth only (like PostgreSQL "require")</li>
-     *   <li>VERIFY_FULL: Mutual TLS authentication (like PostgreSQL "verify-full")</li>
-     * </ul>
-     */
-    public enum SslMode {
-        DISABLED, // Plaintext connection only
-        REQUIRED, // SSL with server authentication (JKS truststore)
-        VERIFY_FULL // Mutual TLS with full authentication (PEM certificates)
-    }
 
     private DirectDataCloudConnection() {
         throw new UnsupportedOperationException("This is a utility class and cannot be instantiated");
@@ -85,7 +85,8 @@ public final class DirectDataCloudConnection {
     }
 
     public static DataCloudConnection of(String url, Properties properties) throws SQLException {
-        // Validate inputs first
+        // Basic input validation - DataCloudConnectionString.of(url) provides comprehensive URL validation
+        // including protocol validation, URL format checking, and parameter parsing
         if (url == null) {
             throw new DataCloudJDBCException("Connection URL cannot be null");
         }
@@ -115,46 +116,116 @@ public final class DirectDataCloudConnection {
     }
 
     private static ManagedChannelBuilder<?> createChannelBuilder(URI uri, Properties properties) throws Exception {
-        final SslMode sslMode = determineSslMode(properties);
+        SslMode sslMode = determineSslMode(properties);
+        String endpoint = uri.getHost() + ":" + uri.getPort();
 
-        log.info("Using SSL mode: {} for connection to {}:{}", sslMode, uri.getHost(), uri.getPort());
+        log.info("Creating {} connection to {}", sslMode.getDescription(), endpoint);
 
         switch (sslMode) {
             case DISABLED:
                 return createPlaintextChannel(uri);
-
-            case REQUIRED:
-                return createRequiredSslChannel(uri, properties);
-
-            case VERIFY_FULL:
-                return createVerifyFullChannel(uri, properties);
-
+            case SYSTEM_TRUSTSTORE:
+                return createSslWithSystemTrust(uri);
+            case CUSTOM_TRUST:
+            case MUTUAL_TLS:
+                return createCustomSslChannel(uri, properties);
             default:
-                throw new DataCloudJDBCException("Unsupported SSL mode: " + sslMode);
-        }
-    }
-
-    private static SslMode determineSslMode(Properties properties) throws DataCloudJDBCException {
-        // Default to DISABLED if no ssl_mode specified (fail-safe approach)
-        final String sslModeStr =
-                optional(properties, SSL_MODE).orElse("DISABLED").trim();
-
-        // Handle empty strings
-        if (sslModeStr.isEmpty()) {
-            return SslMode.DISABLED;
-        }
-
-        try {
-            return SslMode.valueOf(sslModeStr.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new DataCloudJDBCException(String.format(
-                    "Invalid ssl_mode '%s'. Valid values are: DISABLED, REQUIRED, VERIFY_FULL", sslModeStr));
+                throw new IllegalStateException("Unsupported SSL mode: " + sslMode);
         }
     }
 
     /**
+     * Determines the appropriate SSL mode based on provided properties.
+     *
+     * @param properties Connection properties
+     * @return The SSL mode to use
+     * @throws IllegalArgumentException if SSL configuration is invalid
+     */
+    private static SslMode determineSslMode(Properties properties) {
+        // Check for explicit SSL disable (testing only)
+        if (getBooleanOrDefault(properties, SSL_DISABLED, false)) {
+            return SslMode.DISABLED;
+        }
+
+        boolean hasTrustConfig = hasTrustConfiguration(properties);
+        boolean hasClientCert = hasClientCertificates(properties);
+
+        if (hasClientCert) {
+            return SslMode.MUTUAL_TLS;
+        } else if (hasTrustConfig) {
+            return SslMode.CUSTOM_TRUST;
+        } else {
+            return SslMode.SYSTEM_TRUSTSTORE;
+        }
+    }
+
+    /**
+     * SSL/TLS connection modes supported by the DataCloud JDBC driver.
+     */
+    private enum SslMode {
+        /** SSL disabled - plaintext connection (testing only) */
+        DISABLED("plaintext"),
+
+        /** SSL with system truststore - default secure mode */
+        SYSTEM_TRUSTSTORE("SSL with system truststore (one-sided TLS)"),
+
+        /** SSL with custom trust configuration - custom CA or truststore */
+        CUSTOM_TRUST("SSL with custom trust configuration (one-sided TLS)"),
+
+        /** SSL with mutual authentication - client certificates required */
+        MUTUAL_TLS("SSL with client certificates (two-sided TLS)");
+
+        private final String description;
+
+        SslMode(String description) {
+            this.description = description;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+    }
+
+    /**
+     * Checks if trust configuration properties are provided.
+     * Trust configuration determines how server certificates are verified.
+     *
+     * @param properties Connection properties to check
+     * @return true if truststore or CA certificate path is provided
+     */
+    private static boolean hasTrustConfiguration(Properties properties) {
+        return optional(properties, TRUSTSTORE_PATH).isPresent()
+                || optional(properties, CA_CERT_PATH).isPresent();
+    }
+
+    /**
+     * Checks if client certificate properties are provided.
+     * Client certificates enable two-sided TLS (mutual authentication).
+     *
+     * @param properties Connection properties to check
+     * @return true if both client certificate and key paths are provided
+     * @throws IllegalArgumentException if client cert is provided without key or vice versa
+     */
+    private static boolean hasClientCertificates(Properties properties) {
+        boolean hasClientCert = optional(properties, CLIENT_CERT_PATH).isPresent();
+        boolean hasClientKey = optional(properties, CLIENT_KEY_PATH).isPresent();
+
+        // Validate that both cert and key are provided together
+        if (hasClientCert && !hasClientKey) {
+            throw new IllegalArgumentException("Client certificate path provided without client key path. "
+                    + "For mutual TLS, both '" + CLIENT_CERT_PATH + "' and '" + CLIENT_KEY_PATH + "' are required.");
+        }
+        if (hasClientKey && !hasClientCert) {
+            throw new IllegalArgumentException("Client key path provided without client certificate path. "
+                    + "For mutual TLS, both '" + CLIENT_CERT_PATH + "' and '" + CLIENT_KEY_PATH + "' are required.");
+        }
+
+        return hasClientCert && hasClientKey;
+    }
+
+    /**
      * Creates plaintext connection with no encryption.
-     * Similar to PostgreSQL sslmode="disable".
+     * Only used when SSL is explicitly disabled via internal flag.
      */
     private static ManagedChannelBuilder<?> createPlaintextChannel(URI uri) {
         log.info("Creating plaintext connection (no encryption)");
@@ -162,139 +233,136 @@ public final class DirectDataCloudConnection {
     }
 
     /**
-     * Creates SSL connection with server authentication only.
-     * Similar to PostgreSQL sslmode="require" and MySQL sslMode="REQUIRED".
-     *
-     * Requires JKS truststore to verify server certificate.
-     * Client authentication still uses username/password.
+     * Creates SSL connection with system truststore (default behavior).
+     * Uses Java's default truststore for server certificate verification.
+     * No client certificate provided (one-sided TLS).
      */
-    private static ManagedChannelBuilder<?> createRequiredSslChannel(URI uri, Properties properties) throws Exception {
-        return NettyChannelBuilder.forAddress(uri.getHost(), uri.getPort())
-                .sslContext(createServerOnlyTlsContext(properties));
+    private static ManagedChannelBuilder<?> createSslWithSystemTrust(URI uri) throws Exception {
+        log.info("Creating SSL connection with system truststore");
+
+        // Use system default truststore
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init((KeyStore) null); // null uses system default truststore
+
+        SslContext sslContext = GrpcSslContexts.forClient().trustManager(tmf).build();
+
+        return NettyChannelBuilder.forAddress(uri.getHost(), uri.getPort()).sslContext(sslContext);
     }
 
     /**
-     * Creates mutual TLS connection with full authentication.
-     * Similar to PostgreSQL sslmode="verify-full" and MySQL sslMode="VERIFY_IDENTITY".
-     *
-     * Requires PEM certificates for both client and server authentication.
-     * No username/password needed - certificate IS the identity.
+     * Creates SSL connection with custom configuration.
+     * Supports both one-sided and two-sided TLS based on provided properties.
+     * Supports all combinations of JKS/PEM trust verification with PEM client certificates.
      */
-    private static ManagedChannelBuilder<?> createVerifyFullChannel(URI uri, Properties properties) throws Exception {
-        return NettyChannelBuilder.forAddress(uri.getHost(), uri.getPort())
-                .sslContext(createMutualTlsContext(properties));
+    private static ManagedChannelBuilder<?> createCustomSslChannel(URI uri, Properties properties) throws Exception {
+        log.info("Creating SSL connection with custom configuration");
+
+        SslContext sslContext;
+
+        // Check if client certificates are provided (determines one-sided vs two-sided TLS)
+        if (hasClientCertificates(properties)) {
+            // Two-sided TLS: trust verification + client authentication
+            sslContext = createTwoSidedTlsContext(properties);
+            log.info("Client certificates configured - using two-sided TLS");
+        } else {
+            // One-sided TLS: trust verification only
+            sslContext = createOneSidedTlsContext(properties);
+            log.info("No client certificates - using one-sided TLS");
+        }
+
+        return NettyChannelBuilder.forAddress(uri.getHost(), uri.getPort()).sslContext(sslContext);
     }
+
     /**
-     * Creates SSL context for server-only TLS authentication (REQUIRED mode).
-     *
-     * <p>This method creates an SSL context that:
-     * <ul>
-     *   <li>Verifies server certificate against truststore</li>
-     *   <li>Does NOT provide client certificate</li>
-     *   <li>Client authentication uses username/password</li>
-     * </ul>
-     *
-     * @param properties connection properties containing truststore configuration
-     * @return SSL context configured for server authentication only
-     * @throws DataCloudJDBCException if required properties are missing or invalid
-     * @throws Exception if SSL context creation fails
+     * Creates SSL context for one-sided TLS (server authentication only).
+     * Supports both JKS truststore and PEM CA certificate for trust verification.
      */
-    private static SslContext createServerOnlyTlsContext(Properties properties) throws Exception {
-        // Validate required properties - fail fast with clear error messages
-        final String truststorePath = optional(properties, TRUSTSTORE_PATH)
-                .orElseThrow(
-                        () -> new DataCloudJDBCException(
-                                "truststore_path required for REQUIRED mode. Example: truststore_path=/etc/ssl/truststore.jks"));
-        final String truststorePassword = optional(properties, TRUSTSTORE_PASSWORD)
-                .orElseThrow(() -> new DataCloudJDBCException(
-                        "truststore_password required for REQUIRED mode. Example: truststore_password=changeit"));
-        final String truststoreType = optional(properties, TRUSTSTORE_TYPE).orElse("JKS");
+    private static SslContext createOneSidedTlsContext(Properties properties) throws Exception {
+        String truststorePath = optional(properties, TRUSTSTORE_PATH).orElse(null);
+        String caCertPath = optional(properties, CA_CERT_PATH).orElse(null);
 
-        log.info(
-                "Creating SSL context for server authentication - truststore: {}, type: {}",
-                truststorePath,
-                truststoreType);
-
-        // Validate truststore file exists and is readable
-        validateTruststoreFile(truststorePath);
-
-        try {
-            // Load truststore for server certificate verification
-            KeyStore trustStore = KeyStore.getInstance(truststoreType);
-            try (FileInputStream fis = new FileInputStream(truststorePath)) {
-                trustStore.load(fis, truststorePassword.toCharArray());
-                log.debug("Successfully loaded truststore with {} certificates", trustStore.size());
-            }
-
-            // Create trust manager factory to verify server certificate
+        if (truststorePath != null) {
+            // JKS truststore
+            log.info("Using JKS truststore for server verification: {}", truststorePath);
+            TrustManagerFactory tmf = createJksTrustManager(properties);
+            return GrpcSslContexts.forClient().trustManager(tmf).build();
+        } else if (caCertPath != null) {
+            // PEM CA certificate
+            log.info("Using PEM CA certificate for server verification: {}", caCertPath);
+            validatePemFile(caCertPath, "CA certificate");
+            return GrpcSslContexts.forClient()
+                    .trustManager(new File(caCertPath))
+                    .build();
+        } else {
+            // System truststore (fallback)
+            log.info("Using system truststore for server verification");
             TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-            tmf.init(trustStore);
-
-            // Build SSL context with server authentication only
-            SslContext sslContext =
-                    GrpcSslContexts.forClient().trustManager(tmf).build();
-
-            log.info("SSL context created successfully for server-only TLS");
-            return sslContext;
-
-        } catch (Exception e) {
-            log.error("Failed to create SSL context for server-only TLS: {}", e.getMessage());
-            throw new DataCloudJDBCException("Server-only TLS context creation failed: " + e.getMessage(), e);
+            tmf.init((KeyStore) null);
+            return GrpcSslContexts.forClient().trustManager(tmf).build();
         }
     }
 
     /**
-     * Creates SSL context for mutual TLS authentication (VERIFY_FULL mode).
-     *
-     * <p>This method creates an SSL context that:
-     * <ul>
-     *   <li>Verifies server certificate against CA certificate</li>
-     *   <li>Provides client certificate for client authentication</li>
-     *   <li>Certificate IS the client identity (no username/password needed)</li>
-     * </ul>
-     *
-     * @param properties connection properties containing certificate paths
-     * @return SSL context configured for mutual authentication
-     * @throws DataCloudJDBCException if required properties are missing or invalid
-     * @throws Exception if SSL context creation fails
+     * Creates SSL context for two-sided TLS (mutual authentication).
+     * Supports JKS truststore + PEM client certs OR PEM CA cert + PEM client certs.
      */
-    private static SslContext createMutualTlsContext(Properties properties) throws Exception {
-        // Validate required properties - fail fast with helpful error messages
-        final String clientCertPath = optional(properties, CLIENT_CERT_PATH)
-                .orElseThrow(
-                        () -> new DataCloudJDBCException(
-                                "client_cert_path required for VERIFY_FULL mode. Example: client_cert_path=/etc/pki/client.pem"));
-        final String clientKeyPath = optional(properties, CLIENT_KEY_PATH)
-                .orElseThrow(
-                        () -> new DataCloudJDBCException(
-                                "client_key_path required for VERIFY_FULL mode. Example: client_key_path=/etc/pki/client-key.pem"));
-        final String caCertPath = optional(properties, CA_CERT_PATH)
-                .orElseThrow(() -> new DataCloudJDBCException(
-                        "ca_cert_path required for VERIFY_FULL mode. Example: ca_cert_path=/etc/pki/ca.pem"));
+    private static SslContext createTwoSidedTlsContext(Properties properties) throws Exception {
+        String clientCertPath = properties.getProperty(CLIENT_CERT_PATH);
+        String clientKeyPath = properties.getProperty(CLIENT_KEY_PATH);
+        String truststorePath = optional(properties, TRUSTSTORE_PATH).orElse(null);
+        String caCertPath = optional(properties, CA_CERT_PATH).orElse(null);
 
-        log.info(
-                "Creating SSL context for mutual TLS - client cert: {}, key: {}, CA: {}",
-                clientCertPath,
-                clientKeyPath,
-                caCertPath);
-
-        // Validate all certificate files exist and are readable
+        // Validate client certificate files
         validateCertificateFiles(clientCertPath, clientKeyPath, caCertPath);
 
-        try {
-            // Build SSL context with mutual authentication
-            SslContext sslContext = GrpcSslContexts.forClient()
-                    .trustManager(new File(caCertPath)) // Verify server certificate
-                    .keyManager(new File(clientCertPath), new File(clientKeyPath)) // Client identity
+        if (truststorePath != null) {
+            // JKS truststore + PEM client certs
+            log.info("Using JKS truststore + PEM client certificates for mutual TLS");
+            TrustManagerFactory tmf = createJksTrustManager(properties);
+            return GrpcSslContexts.forClient()
+                    .trustManager(tmf)
+                    .keyManager(new File(clientCertPath), new File(clientKeyPath))
                     .build();
-
-            log.info("SSL context created successfully for mutual TLS authentication");
-            return sslContext;
-
-        } catch (Exception e) {
-            log.error("Failed to create SSL context for mutual TLS: {}", e.getMessage());
-            throw new DataCloudJDBCException("Mutual TLS context creation failed: " + e.getMessage(), e);
+        } else if (caCertPath != null) {
+            // PEM CA cert + PEM client certs
+            log.info("Using PEM CA certificate + PEM client certificates for mutual TLS");
+            return GrpcSslContexts.forClient()
+                    .trustManager(new File(caCertPath))
+                    .keyManager(new File(clientCertPath), new File(clientKeyPath))
+                    .build();
+        } else {
+            // System truststore + PEM client certs
+            log.info("Using system truststore + PEM client certificates for mutual TLS");
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init((KeyStore) null);
+            return GrpcSslContexts.forClient()
+                    .trustManager(tmf)
+                    .keyManager(new File(clientCertPath), new File(clientKeyPath))
+                    .build();
         }
+    }
+
+    /**
+     * Creates trust manager from JKS truststore.
+     */
+    private static TrustManagerFactory createJksTrustManager(Properties properties) throws Exception {
+        String truststorePath = properties.getProperty(TRUSTSTORE_PATH);
+        String truststorePassword = optional(properties, TRUSTSTORE_PASSWORD).orElse("");
+        String truststoreType = optional(properties, TRUSTSTORE_TYPE).orElse("JKS");
+
+        // Validate truststore file
+        validateTruststoreFile(truststorePath);
+
+        // Load truststore
+        KeyStore trustStore = KeyStore.getInstance(truststoreType);
+        try (FileInputStream fis = new FileInputStream(truststorePath)) {
+            trustStore.load(fis, truststorePassword.toCharArray());
+            log.debug("Successfully loaded JKS truststore with {} certificates", trustStore.size());
+        }
+
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(trustStore);
+        return tmf;
     }
 
     /**
@@ -322,30 +390,40 @@ public final class DirectDataCloudConnection {
             throws DataCloudJDBCException {
         validatePemFile(clientCertPath, "Client certificate");
         validatePemFile(clientKeyPath, "Client private key");
-        validatePemFile(caCertPath, "CA certificate");
 
-        // Additional validation - ensure client cert and key are a matching pair
-        // This is a basic check - more sophisticated validation could be added
+        // CA certificate is optional (might use JKS truststore instead)
+        if (caCertPath != null) {
+            validatePemFile(caCertPath, "CA certificate");
+        }
+
+        // TODO: Add advanced certificate validation for production use:
+        //  1. Cryptographic pair validation - verify client cert and private key match
+        //  2. Certificate expiration validation - check validity dates and warn about expiring certs
+        //  3. Certificate chain validation - verify client cert is signed by provided CA
+        //  4. Key algorithm validation - ensure supported algorithms (RSA, EC)
+        //  5. Certificate purpose validation - verify cert is valid for client authentication
+        //  This would catch configuration errors early with clear error messages instead of
+        //  runtime SSL handshake failures. Could be enabled via 'validate_certificates' property.
         log.debug("Certificate file validation completed successfully");
     }
 
-    /**
-     * Validates a PEM certificate file.
-     */
     private static void validatePemFile(String path, String description) throws DataCloudJDBCException {
         File file = new File(path);
         if (!file.exists()) {
             throw new DataCloudJDBCException(
-                    description + " file not found: " + path + ". Ensure the PEM file exists and the path is correct.");
+                    "File not found, ensure the file exists and the path is correct. description={}, path={}");
         }
         if (!file.canRead()) {
-            throw new DataCloudJDBCException(
-                    description + " file is not readable: " + path + ". Check file permissions.");
+            throw new DataCloudJDBCException("File is not readable, check file permissions. description={}, path={}");
         }
         if (file.length() == 0) {
             throw new DataCloudJDBCException(description + " file is empty: " + path);
         }
 
+        basicPemValidation(path, description, file);
+    }
+
+    private static void basicPemValidation(String path, String description, File file) {
         // Basic PEM format validation - check for PEM markers (Java 8 compatible)
         try (java.util.Scanner scanner = new java.util.Scanner(file)) {
             String content = scanner.useDelimiter("\\A").next();

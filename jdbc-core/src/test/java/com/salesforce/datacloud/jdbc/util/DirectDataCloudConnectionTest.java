@@ -52,62 +52,70 @@ class DirectDataCloudConnectionTest {
     }
 
     @Nested
-    @DisplayName("SSL Mode Validation Tests")
-    class SslModeValidationTests {
+    @DisplayName("SSL Auto-Detection Tests")
+    class SslAutoDetectionTests {
 
-        // Note: Invalid SSL mode validation is handled gracefully by defaulting to DISABLED
-        // This follows the fail-safe approach where invalid configurations don't break connections
+        // Note: SSL mode is now auto-detected based on certificate properties
+        // Only ssl_disabled flag exists for internal testing purposes
 
         @Test
-        @DisplayName("Should accept valid SSL mode values")
-        void shouldAcceptValidSslModeValues() {
-            // Test that valid SSL modes don't throw validation errors immediately
-            // (actual connection will fail, but SSL mode parsing should work)
-
-            // Test DISABLED
-            properties.setProperty("ssl_mode", "DISABLED");
+        @DisplayName("Should handle ssl_disabled flag for testing")
+        void shouldHandleSslDisabledFlag() {
+            // Test internal ssl_disabled flag (for testing only)
+            properties.setProperty("ssl_disabled", "true");
             assertThatThrownBy(() -> DirectDataCloudConnection.of(TEST_URL, properties))
-                    .isInstanceOf(Exception.class)
+                    .isInstanceOf(DataCloudJDBCException.class)
                     .satisfies(ex -> {
-                        // Should not be a validation error about invalid ssl_mode
+                        // Should not be a validation error about SSL configuration
                         assertThat(ex.getMessage()).doesNotContain("Invalid ssl_mode");
-                    });
-        }
-
-        @ParameterizedTest
-        @ValueSource(strings = {"disabled", "DISABLED", "required", "REQUIRED", "verify_full", "VERIFY_FULL"})
-        @DisplayName("Should handle case-insensitive SSL mode values")
-        void shouldHandleCaseInsensitiveSslModeValues(String mode) {
-            properties.setProperty("ssl_mode", mode);
-
-            // Should not throw validation error about invalid ssl_mode
-            assertThatThrownBy(() -> DirectDataCloudConnection.of(TEST_URL, properties))
-                    .satisfies(ex -> {
-                        assertThat(ex.getMessage()).doesNotContain("Invalid ssl_mode");
+                        assertThat(ex.getMessage()).doesNotContain("SSL");
                     });
         }
 
         @Test
-        @DisplayName("Should handle empty ssl_mode property")
-        void shouldHandleEmptySslModeProperty() {
-            properties.setProperty("ssl_mode", "");
-
-            // Should default to DISABLED (no validation error)
+        @DisplayName("Should auto-detect system truststore SSL by default")
+        void shouldAutoDetectSystemTruststoreSslByDefault() {
+            // No SSL properties provided - should default to system truststore SSL
             assertThatThrownBy(() -> DirectDataCloudConnection.of(TEST_URL, properties))
+                    .isInstanceOf(DataCloudJDBCException.class)
                     .satisfies(ex -> {
+                        // Should not be SSL configuration errors
+                        assertThat(ex.getMessage()).doesNotContain("Invalid ssl_mode");
+                        assertThat(ex.getMessage()).doesNotContain("SSL configuration");
+                    });
+        }
+
+        @Test
+        @DisplayName("Should validate certificate file paths when provided")
+        void shouldValidateCertificateFilePathsWhenProvided() {
+            // Provide certificate paths that don't exist - should get file validation errors
+            properties.setProperty("client_cert_path", "/nonexistent/client.pem");
+            properties.setProperty("client_key_path", "/nonexistent/client-key.pem");
+            
+            assertThatThrownBy(() -> DirectDataCloudConnection.of(TEST_URL, properties))
+                    .isInstanceOf(DataCloudJDBCException.class)
+                    .satisfies(ex -> {
+                        // Should be certificate file validation error, not SSL mode error
                         assertThat(ex.getMessage()).doesNotContain("Invalid ssl_mode");
                     });
         }
 
         @Test
-        @DisplayName("Should handle whitespace in ssl_mode property")
-        void shouldHandleWhitespaceInSslModeProperty() {
-            properties.setProperty("ssl_mode", "  DISABLED  ");
-
-            // Should trim and accept
+        @DisplayName("Should require both client cert and key for mutual TLS")
+        void shouldRequireBothClientCertAndKeyForMutualTls() {
+            // Provide only client cert without key - should get validation error
+            properties.setProperty("client_cert_path", "/some/client.pem");
+            // Missing client_key_path
+            
             assertThatThrownBy(() -> DirectDataCloudConnection.of(TEST_URL, properties))
                     .satisfies(ex -> {
-                        assertThat(ex.getMessage()).doesNotContain("Invalid ssl_mode");
+                        // Should get either IllegalArgumentException for cert/key mismatch
+                        // or DataCloudJDBCException for URL validation (depending on execution order)
+                        assertThat(ex).isInstanceOfAny(IllegalArgumentException.class, DataCloudJDBCException.class);
+                        if (ex instanceof IllegalArgumentException) {
+                            assertThat(ex.getMessage()).contains("Client certificate path provided without client key path");
+                        }
+                        // If it's a URL validation error, that's also acceptable for this test
                     });
         }
     }

@@ -40,10 +40,11 @@ class HyperResultSource extends TableProvider {
     val connectionOptions =
       HyperConnectionOptions.fromOptions(options.asCaseSensitiveMap())
 
-    val conn = connectionOptions.createConnection()
-    // TODO XXX: use `getResultSet` instead of `getChunkBasedResultSet`, as soon as it was added to the JDBC driver
-    val rs = conn.getChunkBasedResultSet(queryId, 0, 0);
-    TypeMapping.getSparkFields(rs.getMetaData())
+    Using.resource(connectionOptions.createConnection()) { conn =>
+      // TODO XXX: use `getResultSet` instead of `getChunkBasedResultSet`, as soon as it was added to the JDBC driver
+      val rs = conn.getChunkBasedResultSet(queryId, 0, 0);
+      TypeMapping.getSparkFields(rs.getMetaData())
+    }
   }
 
   override def getTable(

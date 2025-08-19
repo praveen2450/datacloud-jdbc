@@ -23,9 +23,9 @@ import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import com.salesforce.datacloud.jdbc.hyper.HyperServerConfig;
 import com.salesforce.datacloud.jdbc.hyper.HyperTestBase;
-import com.salesforce.datacloud.query.v3.DataCloudQueryStatus;
+import com.salesforce.datacloud.jdbc.util.Deadline;
+import com.salesforce.datacloud.query.v3.QueryStatus;
 import java.sql.ResultSet;
-import java.util.stream.Collectors;
 import lombok.SneakyThrows;
 import lombok.val;
 import org.junit.jupiter.api.Test;
@@ -48,13 +48,18 @@ public class DataCloudStatementFunctionalTest {
             stmt.executeAsyncQuery("select pg_sleep(5000000);");
 
             val queryId = stmt.unwrap(DataCloudStatement.class).getQueryId();
-            val a = client.getQueryStatus(queryId).findFirst().get();
-            assertThat(a.getCompletionStatus()).isEqualTo(DataCloudQueryStatus.CompletionStatus.RUNNING);
+            val a = client.waitFor(queryId, Deadline.infinite(), t -> true);
+            assertThat(a.getCompletionStatus()).isEqualTo(QueryStatus.CompletionStatus.RUNNING);
 
             stmt.cancel();
 
-            assertThatThrownBy(() -> client.getQueryStatus(queryId).collect(Collectors.toList()))
-                    .hasMessageStartingWith("FAILED_PRECONDITION: canceled");
+            // we wait for all results produced, because this will throw waitFor's predicate failed but query finished
+            // flow
+            // but on subsequent invocations of waitFor we will see the canceled status we are expecting to see to test
+            // stmt::cancel
+            client.waitFor(queryId, Deadline.infinite(), QueryStatus::allResultsProduced);
+            assertThatThrownBy(() -> client.waitFor(queryId, Deadline.infinite(), QueryStatus::allResultsProduced))
+                    .hasMessageContaining("57014: canceled by user");
         }
     }
 
@@ -71,13 +76,18 @@ public class DataCloudStatementFunctionalTest {
             stmt.executeAsyncQuery();
 
             val queryId = stmt.getQueryId();
-            val a = client.getQueryStatus(queryId).findFirst().get();
-            assertThat(a.getCompletionStatus()).isEqualTo(DataCloudQueryStatus.CompletionStatus.RUNNING);
+            val a = client.waitFor(queryId, Deadline.infinite(), t -> true);
+            assertThat(a.getCompletionStatus()).isEqualTo(QueryStatus.CompletionStatus.RUNNING);
 
             stmt.cancel();
 
-            assertThatThrownBy(() -> client.getQueryStatus(queryId).collect(Collectors.toList()))
-                    .hasMessageStartingWith("FAILED_PRECONDITION: canceled");
+            // we wait for all results produced, because this will throw waitFor's predicate failed but query finished
+            // flow
+            // but on subsequent invocations of waitFor we will see the canceled status we are expecting to see to test
+            // stmt::cancel
+            client.waitFor(queryId, Deadline.infinite(), QueryStatus::allResultsProduced);
+            assertThatThrownBy(() -> client.waitFor(queryId, Deadline.infinite(), QueryStatus::allResultsProduced))
+                    .hasMessageContaining("57014: canceled by user");
         }
     }
 
@@ -93,13 +103,18 @@ public class DataCloudStatementFunctionalTest {
             stmt.executeAsyncQuery("select pg_sleep(5000000);");
             val queryId = stmt.getQueryId();
 
-            val a = client.getQueryStatus(queryId).findFirst().get();
-            assertThat(a.getCompletionStatus()).isEqualTo(DataCloudQueryStatus.CompletionStatus.RUNNING);
+            val a = client.waitFor(queryId, Deadline.infinite(), t -> true);
+            assertThat(a.getCompletionStatus()).isEqualTo(QueryStatus.CompletionStatus.RUNNING);
 
             conn.cancelQuery(queryId);
 
-            assertThatThrownBy(() -> client.getQueryStatus(queryId).collect(Collectors.toList()))
-                    .hasMessageStartingWith("FAILED_PRECONDITION: canceled");
+            // we wait for all results produced, because this will throw waitFor's predicate failed but query finished
+            // flow
+            // but on subsequent invocations of waitFor we will see the canceled status we are expecting to see to test
+            // stmt::cancel
+            client.waitFor(queryId, Deadline.infinite(), QueryStatus::allResultsProduced);
+            assertThatThrownBy(() -> client.waitFor(queryId, Deadline.infinite(), QueryStatus::allResultsProduced))
+                    .hasMessageStartingWith("57014: canceled by user");
         }
     }
 

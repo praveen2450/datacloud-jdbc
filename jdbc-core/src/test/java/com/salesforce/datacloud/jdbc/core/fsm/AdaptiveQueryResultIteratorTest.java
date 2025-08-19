@@ -16,20 +16,27 @@
 package com.salesforce.datacloud.jdbc.core.fsm;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.salesforce.datacloud.jdbc.core.HyperGrpcTestBase;
+import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import com.salesforce.datacloud.jdbc.util.QueryTimeout;
-import com.salesforce.datacloud.query.v3.DataCloudQueryStatus;
+import com.salesforce.datacloud.query.v3.QueryStatus;
+import io.grpc.Status;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.stream.Stream;
 import lombok.val;
+import org.grpcmock.GrpcMock;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import salesforce.cdp.hyperdb.v1.ExecuteQueryResponse;
+import salesforce.cdp.hyperdb.v1.HyperServiceGrpc;
+import salesforce.cdp.hyperdb.v1.QueryInfo;
 import salesforce.cdp.hyperdb.v1.QueryParam;
-import salesforce.cdp.hyperdb.v1.QueryStatus;
 
 public class AdaptiveQueryResultIteratorTest extends HyperGrpcTestBase {
 
@@ -43,7 +50,8 @@ public class AdaptiveQueryResultIteratorTest extends HyperGrpcTestBase {
                 TEST_QUERY_ID,
                 TEST_QUERY,
                 QueryParam.TransferMode.ADAPTIVE,
-                executeQueryResponse(TEST_QUERY_ID, QueryStatus.CompletionStatus.FINISHED, 1));
+                executeQueryResponse(
+                        TEST_QUERY_ID, salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.FINISHED, 1));
 
         val iterator = AdaptiveQueryResultIterator.of(TEST_QUERY, hyperGrpcClient, TEST_TIMEOUT);
 
@@ -62,7 +70,8 @@ public class AdaptiveQueryResultIteratorTest extends HyperGrpcTestBase {
                 TEST_QUERY_ID,
                 TEST_QUERY,
                 QueryParam.TransferMode.ADAPTIVE,
-                executeQueryResponse(TEST_QUERY_ID, QueryStatus.CompletionStatus.FINISHED, chunkCount));
+                executeQueryResponse(
+                        TEST_QUERY_ID, salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.FINISHED, chunkCount));
 
         for (int i = 1; i < chunkCount; i++) {
             setupFakeChunk(i);
@@ -84,9 +93,12 @@ public class AdaptiveQueryResultIteratorTest extends HyperGrpcTestBase {
                 TEST_QUERY_ID,
                 TEST_QUERY,
                 QueryParam.TransferMode.ADAPTIVE,
-                executeQueryResponse(TEST_QUERY_ID, QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED, 1));
+                executeQueryResponse(
+                        TEST_QUERY_ID,
+                        salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED,
+                        1));
 
-        setupGetQueryInfo(TEST_QUERY_ID, QueryStatus.CompletionStatus.FINISHED, 1);
+        setupGetQueryInfo(TEST_QUERY_ID, salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.FINISHED, 1);
 
         val iterator = AdaptiveQueryResultIterator.of(TEST_QUERY, hyperGrpcClient, TEST_TIMEOUT);
 
@@ -103,9 +115,12 @@ public class AdaptiveQueryResultIteratorTest extends HyperGrpcTestBase {
                 TEST_QUERY_ID,
                 TEST_QUERY,
                 QueryParam.TransferMode.ADAPTIVE,
-                executeQueryResponse(TEST_QUERY_ID, QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED, 1));
+                executeQueryResponse(
+                        TEST_QUERY_ID,
+                        salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED,
+                        1));
 
-        setupGetQueryInfo(TEST_QUERY_ID, QueryStatus.CompletionStatus.FINISHED, 3);
+        setupGetQueryInfo(TEST_QUERY_ID, salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.FINISHED, 3);
         setupFakeChunk(1);
         setupFakeChunk(2);
 
@@ -125,9 +140,12 @@ public class AdaptiveQueryResultIteratorTest extends HyperGrpcTestBase {
                 TEST_QUERY_ID,
                 TEST_QUERY,
                 QueryParam.TransferMode.ADAPTIVE,
-                executeQueryResponse(TEST_QUERY_ID, QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED, 1));
+                executeQueryResponse(
+                        TEST_QUERY_ID,
+                        salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED,
+                        1));
 
-        setupGetQueryInfo(TEST_QUERY_ID, QueryStatus.CompletionStatus.FINISHED, 1);
+        setupGetQueryInfo(TEST_QUERY_ID, salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.FINISHED, 1);
 
         val iterator = AdaptiveQueryResultIterator.of(TEST_QUERY, hyperGrpcClient, TEST_TIMEOUT);
 
@@ -142,7 +160,8 @@ public class AdaptiveQueryResultIteratorTest extends HyperGrpcTestBase {
                 TEST_QUERY_ID,
                 TEST_QUERY,
                 QueryParam.TransferMode.ADAPTIVE,
-                executeQueryResponse(TEST_QUERY_ID, QueryStatus.CompletionStatus.RESULTS_PRODUCED, 2));
+                executeQueryResponse(
+                        TEST_QUERY_ID, salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RESULTS_PRODUCED, 2));
 
         setupFakeChunk(1);
 
@@ -160,7 +179,8 @@ public class AdaptiveQueryResultIteratorTest extends HyperGrpcTestBase {
     @ParameterizedTest
     @MethodSource("allCompletionStatuses")
     public void shouldReportCorrectQueryStatus(
-            QueryStatus.CompletionStatus inputStatus, DataCloudQueryStatus.CompletionStatus expectedStatus)
+            salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus inputStatus,
+            QueryStatus.CompletionStatus expectedStatus)
             throws Exception {
         setupExecuteQuery(
                 TEST_QUERY_ID,
@@ -170,7 +190,7 @@ public class AdaptiveQueryResultIteratorTest extends HyperGrpcTestBase {
 
         val iterator = AdaptiveQueryResultIterator.of(TEST_QUERY, hyperGrpcClient, TEST_TIMEOUT);
 
-        if (inputStatus == QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED) {
+        if (inputStatus == salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED) {
             assertThat(iterator.getQueryStatus().getCompletionStatus()).isEqualTo(expectedStatus);
         } else {
             iterator.hasNext();
@@ -188,9 +208,12 @@ public class AdaptiveQueryResultIteratorTest extends HyperGrpcTestBase {
                 TEST_QUERY_ID,
                 TEST_QUERY,
                 QueryParam.TransferMode.ADAPTIVE,
-                executeQueryResponse(TEST_QUERY_ID, QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED, 1));
+                executeQueryResponse(
+                        TEST_QUERY_ID,
+                        salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED,
+                        1));
 
-        setupGetQueryInfo(TEST_QUERY_ID, QueryStatus.CompletionStatus.FINISHED, 1);
+        setupGetQueryInfo(TEST_QUERY_ID, salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.FINISHED, 1);
 
         val iterator = AdaptiveQueryResultIterator.of(TEST_QUERY, hyperGrpcClient, TEST_TIMEOUT);
 
@@ -205,12 +228,15 @@ public class AdaptiveQueryResultIteratorTest extends HyperGrpcTestBase {
                 TEST_QUERY_ID,
                 TEST_QUERY,
                 QueryParam.TransferMode.ADAPTIVE,
-                executeQueryResponse(TEST_QUERY_ID, QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED, 3));
+                executeQueryResponse(
+                        TEST_QUERY_ID,
+                        salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED,
+                        3));
 
         for (int i = 1; i < 3; i++) {
             setupFakeChunk(i);
         }
-        setupGetQueryInfo(TEST_QUERY_ID, QueryStatus.CompletionStatus.FINISHED, 4);
+        setupGetQueryInfo(TEST_QUERY_ID, salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.FINISHED, 4);
         setupFakeChunk(3);
 
         val iterator = AdaptiveQueryResultIterator.of(TEST_QUERY, hyperGrpcClient, TEST_TIMEOUT);
@@ -240,11 +266,161 @@ public class AdaptiveQueryResultIteratorTest extends HyperGrpcTestBase {
     private static Stream<Arguments> allCompletionStatuses() {
         return Stream.of(
                 Arguments.of(
-                        QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED,
-                        DataCloudQueryStatus.CompletionStatus.RUNNING),
+                        salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED,
+                        QueryStatus.CompletionStatus.RUNNING),
                 Arguments.of(
-                        QueryStatus.CompletionStatus.RESULTS_PRODUCED,
-                        DataCloudQueryStatus.CompletionStatus.RESULTS_PRODUCED),
-                Arguments.of(QueryStatus.CompletionStatus.FINISHED, DataCloudQueryStatus.CompletionStatus.FINISHED));
+                        salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RESULTS_PRODUCED,
+                        QueryStatus.CompletionStatus.RESULTS_PRODUCED),
+                Arguments.of(
+                        salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.FINISHED,
+                        QueryStatus.CompletionStatus.FINISHED));
+    }
+
+    @Test
+    public void whenOptionalExecuteQueryResponseReceived_shouldSkipAndContinueProcessing() throws Exception {
+        val responses = Arrays.asList(
+                ExecuteQueryResponse.newBuilder()
+                        .setQueryInfo(QueryInfo.newBuilder()
+                                .setQueryStatus(salesforce.cdp.hyperdb.v1.QueryStatus.newBuilder()
+                                        .setQueryId(TEST_QUERY_ID)
+                                        .setCompletionStatus(
+                                                salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus
+                                                        .RUNNING_OR_UNSPECIFIED)
+                                        .setChunkCount(1)
+                                        .build())
+                                .build())
+                        .build(),
+                ExecuteQueryResponse.newBuilder().setOptional(true).build(),
+                ExecuteQueryResponse.newBuilder()
+                        .setQueryInfo(QueryInfo.newBuilder()
+                                .setQueryStatus(salesforce.cdp.hyperdb.v1.QueryStatus.newBuilder()
+                                        .setQueryId(TEST_QUERY_ID)
+                                        .setCompletionStatus(
+                                                salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.FINISHED)
+                                        .setChunkCount(1)
+                                        .build())
+                                .build())
+                        .build());
+
+        setupExecuteQuery(
+                TEST_QUERY_ID,
+                TEST_QUERY,
+                QueryParam.TransferMode.ADAPTIVE,
+                responses.toArray(new ExecuteQueryResponse[0]));
+
+        val iterator = AdaptiveQueryResultIterator.of(TEST_QUERY, hyperGrpcClient, TEST_TIMEOUT);
+
+        assertThat(iterator.hasNext()).isFalse();
+        assertThat(iterator.getQueryStatus().allResultsProduced()).isTrue();
+        verifyGetQueryInfo(0);
+        verifyGetQueryResult(0);
+    }
+
+    @Test
+    public void whenOptionalQueryInfoReceived_shouldSkipAndContinuePolling() throws Exception {
+        setupExecuteQuery(
+                TEST_QUERY_ID,
+                TEST_QUERY,
+                QueryParam.TransferMode.ADAPTIVE,
+                executeQueryResponse(
+                        TEST_QUERY_ID,
+                        salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED,
+                        1));
+
+        GrpcMock.stubFor(GrpcMock.serverStreamingMethod(HyperServiceGrpc.getGetQueryInfoMethod())
+                .withRequest(req -> req.getQueryId().equals(TEST_QUERY_ID))
+                .willProxyTo((request, observer) -> {
+                    observer.onNext(QueryInfo.newBuilder().setOptional(true).build());
+
+                    observer.onNext(QueryInfo.newBuilder()
+                            .setQueryStatus(salesforce.cdp.hyperdb.v1.QueryStatus.newBuilder()
+                                    .setQueryId(TEST_QUERY_ID)
+                                    .setCompletionStatus(
+                                            salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.FINISHED)
+                                    .setChunkCount(1)
+                                    .build())
+                            .build());
+                    observer.onCompleted();
+                }));
+
+        val iterator = AdaptiveQueryResultIterator.of(TEST_QUERY, hyperGrpcClient, TEST_TIMEOUT);
+
+        assertThat(iterator.hasNext()).isFalse();
+        assertThat(iterator.getQueryStatus().allResultsProduced()).isTrue();
+        verifyGetQueryInfo(1);
+        verifyGetQueryResult(0);
+    }
+
+    @Test
+    public void whenExecuteQueryStreamThrowsCancelled_shouldRetryWithGetQueryInfo() throws Exception {
+        val queryInfoResponse = executeQueryResponse(
+                TEST_QUERY_ID, salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED, 1);
+
+        GrpcMock.stubFor(GrpcMock.serverStreamingMethod(HyperServiceGrpc.getExecuteQueryMethod())
+                .withRequest(req ->
+                        req.getQuery().equals(TEST_QUERY) && req.getTransferMode() == QueryParam.TransferMode.ADAPTIVE)
+                .willReturn(GrpcMock.stream(GrpcMock.response(queryInfoResponse))
+                        .and(GrpcMock.statusException(Status.CANCELLED))));
+
+        setupGetQueryInfo(TEST_QUERY_ID, salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.FINISHED, 1);
+
+        val iterator = AdaptiveQueryResultIterator.of(TEST_QUERY, hyperGrpcClient, TEST_TIMEOUT);
+
+        assertThat(iterator.hasNext()).isFalse();
+        verifyGetQueryInfo(1);
+        verifyGetQueryResult(0);
+    }
+
+    @Test
+    public void whenGetQueryInfoStreamThrowsCancelled_shouldRetryWithGetQueryInfo() throws Exception {
+        setupExecuteQuery(
+                TEST_QUERY_ID,
+                TEST_QUERY,
+                QueryParam.TransferMode.ADAPTIVE,
+                executeQueryResponse(
+                        TEST_QUERY_ID,
+                        salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED,
+                        1));
+
+        val status = salesforce.cdp.hyperdb.v1.QueryStatus.newBuilder()
+                .setQueryId(TEST_QUERY_ID)
+                .setCompletionStatus(salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.RUNNING_OR_UNSPECIFIED)
+                .setChunkCount(1)
+                .build();
+
+        val running = QueryInfo.newBuilder().setQueryStatus(status).build();
+        val finished = QueryInfo.newBuilder()
+                .setQueryStatus(status.toBuilder()
+                        .setCompletionStatus(salesforce.cdp.hyperdb.v1.QueryStatus.CompletionStatus.FINISHED)
+                        .build())
+                .build();
+
+        GrpcMock.stubFor(GrpcMock.serverStreamingMethod(HyperServiceGrpc.getGetQueryInfoMethod())
+                .withRequest(req -> req.getQueryId().equals(TEST_QUERY_ID))
+                .willReturn(GrpcMock.statusException(Status.CANCELLED))
+                .nextWillReturn(running)
+                .nextWillReturn(GrpcMock.statusException(Status.CANCELLED))
+                .nextWillReturn(finished));
+
+        val iterator = AdaptiveQueryResultIterator.of(TEST_QUERY, hyperGrpcClient, TEST_TIMEOUT);
+
+        assertThat(iterator.hasNext()).isFalse();
+        verifyGetQueryInfo(4);
+        verifyGetQueryResult(0);
+    }
+
+    @Test
+    public void whenExecuteQueryThrowsCancelledWithoutQueryId_shouldFailQuery() {
+        GrpcMock.stubFor(GrpcMock.serverStreamingMethod(HyperServiceGrpc.getExecuteQueryMethod())
+                .withRequest(req ->
+                        req.getQuery().equals(TEST_QUERY) && req.getTransferMode() == QueryParam.TransferMode.ADAPTIVE)
+                .willReturn(GrpcMock.statusException(Status.CANCELLED)));
+
+        assertThatThrownBy(() -> AdaptiveQueryResultIterator.of(TEST_QUERY, hyperGrpcClient, TEST_TIMEOUT))
+                .isInstanceOf(DataCloudJDBCException.class)
+                .hasMessage("Failed to execute query: " + TEST_QUERY);
+
+        verifyGetQueryInfo(0);
+        verifyGetQueryResult(0);
     }
 }

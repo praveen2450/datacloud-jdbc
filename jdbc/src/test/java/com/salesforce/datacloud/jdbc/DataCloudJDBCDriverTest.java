@@ -136,4 +136,39 @@ public class DataCloudJDBCDriverTest {
         assertThat(url).isEqualTo(DataCloudConnectionString.CONNECTION_PROTOCOL + "//login.salesforce.com");
         assertThat(driver).isInstanceOf(DataCloudJDBCDriver.class);
     }
+
+    @Test
+    public void testUnknownPropertyRaisesUserError() {
+        final Driver driver = new DataCloudJDBCDriver();
+        Properties properties = new Properties();
+        properties.setProperty("FOO", "BAR");
+
+        assertThatExceptionOfType(DataCloudJDBCException.class)
+                .isThrownBy(() -> driver.connect(VALID_URL, properties))
+                .withMessageContaining("Unknown JDBC properties");
+    }
+
+    @Test
+    public void testDirectWithUnknownPropertyRaisesUserError() {
+        final Driver driver = new DataCloudJDBCDriver();
+        Properties properties = new Properties();
+        properties.setProperty("direct", "true");
+        properties.setProperty("FOO", "BAR");
+
+        assertThatExceptionOfType(DataCloudJDBCException.class)
+                .isThrownBy(() -> driver.connect(VALID_URL, properties))
+                .withMessageContaining("Unknown JDBC properties");
+    }
+
+    @Test
+    public void testKnownPropertiesWithoutAuthRaiseNoAuth() {
+        final Driver driver = new DataCloudJDBCDriver();
+        Properties properties = new Properties();
+        properties.setProperty("user", "alice");
+        properties.setProperty("querySetting.lc_time", "en_us");
+
+        assertThatExceptionOfType(DataCloudJDBCException.class)
+                .isThrownBy(() -> driver.connect(VALID_URL, properties))
+                .withMessageContaining("No authentication settings provided");
+    }
 }

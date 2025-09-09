@@ -11,6 +11,7 @@ dependencies {
   devPublication(project(":jdbc-grpc"))
   devPublication(project(":jdbc-http"))
   devPublication(project(":jdbc-util"))
+  devPublication(project(":spark-datasource-core"))
   devPublication(project(":spark-datasource"))
 }
 
@@ -21,6 +22,7 @@ tasks.named("updateDevRepo") {
   dependsOn(":jdbc-grpc:publishAllToDevRepo")
   dependsOn(":jdbc-http:publishAllToDevRepo")
   dependsOn(":jdbc-util:publishAllToDevRepo")
+  dependsOn(":spark-datasource-core:publishAllToDevRepo")
   dependsOn(":spark-datasource:publishAllToDevRepo")
 }
 
@@ -35,7 +37,7 @@ tasks.named("check") {
   val repo = devPublish.devMavenRepo.file("com/salesforce/datacloud/").get().asFile
 
   doLast {
-    val expectedPublications = setOf("jdbc", "jdbc-grpc", "jdbc-proto", "jdbc-core", "jdbc-util", "jdbc-http", "spark-datasource")
+    val expectedPublications = setOf("jdbc", "jdbc-grpc", "jdbc-proto", "jdbc-core", "jdbc-util", "jdbc-http", "spark-datasource-core", "spark-datasource")
     val shaded = setOf("jdbc")
 
     val resolvedVersion = expectedVersion.get()

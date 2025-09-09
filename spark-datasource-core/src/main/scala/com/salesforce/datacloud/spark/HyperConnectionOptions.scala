@@ -1,11 +1,11 @@
-package com.salesforce.datacloud.spark.core
+package com.salesforce.datacloud.spark
 
 import java.util.Properties
 import com.salesforce.datacloud.jdbc.core.DataCloudConnection
 import io.grpc.ManagedChannelBuilder
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-case class HyperConnectionOptions(
+private case class HyperConnectionOptions(
     host: String,
     port: Int
 ) {
@@ -19,7 +19,7 @@ case class HyperConnectionOptions(
   }
 }
 
-object HyperConnectionOptions {
+private object HyperConnectionOptions {
   def fromOptions(
       options: java.util.Map[String, String]
   ): HyperConnectionOptions = {

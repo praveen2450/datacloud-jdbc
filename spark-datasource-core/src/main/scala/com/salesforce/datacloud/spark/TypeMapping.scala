@@ -1,4 +1,4 @@
-package com.salesforce.datacloud.spark.core
+package com.salesforce.datacloud.spark
 
 import org.apache.spark.sql.types.{
   StructType,
@@ -29,7 +29,7 @@ import org.apache.spark.sql.catalyst.util.SparkDateTimeUtils
   *
   * Maps JDBC types to Spark types.
   */
-object TypeMapping {
+private object TypeMapping {
 
   /** Get the Spark type for a given JDBC type.
     *

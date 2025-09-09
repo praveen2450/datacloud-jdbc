@@ -1,4 +1,4 @@
-package com.salesforce.datacloud.spark.core
+package com.salesforce.datacloud.spark
 
 import com.salesforce.datacloud.query.v3.QueryStatus
 import org.apache.spark.sql.connector.catalog.SupportsRead
@@ -18,7 +18,7 @@ import scala.util.Using
 import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 
-case class HyperResultTable(
+private case class HyperResultTable(
     connectionOptions: HyperConnectionOptions,
     resultSetId: String,
     schema: StructType

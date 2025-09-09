@@ -5,6 +5,9 @@ plugins {
     id("publishing-conventions")
 }
 
+// Apply shared shading utilities
+apply(from = "${rootProject.projectDir}/gradle/shading.gradle")
+
 description = "Spark Datasource for Salesforce Data Cloud JDBC"
 val mavenName: String by extra("Spark Datasource for Salesforce Data Cloud JDBC")
 val mavenDescription: String by extra("${project.description}")
@@ -13,16 +16,11 @@ dependencies {
     // Core spark datasource implementation
     implementation(project(":spark-datasource-core"))
     
-    // JDBC dependencies: implementation because we need them at runtime AND in shaded JAR
-    implementation(project(":jdbc-core"))  // Provides DataCloudConnection at runtime
-    implementation(project(":jdbc-util"))  // Provides utility functions at runtime
+    // Full JDBC driver with all build/config dependencies (includes gRPC implementations)
+    implementation(project(":jdbc"))  // This provides DataCloudJDBCDriver with full gRPC runtime
     
     // Spark dependencies: compileOnly because user provides Spark at runtime
     compileOnly(libs.bundles.spark)  // Compile against Spark APIs only, don't include in JAR
-    
-    // gRPC dependencies: implementation because we want them included in shaded JAR
-    implementation(project(":jdbc-grpc"))    // Include gRPC implementations for runtime
-    implementation(libs.bundles.grpc.impl)   // Include all gRPC libraries in shaded JAR
     
     // Override transitive Jackson Scala module from Spark with newer version
     implementation(libs.jackson.module.scala)
@@ -37,64 +35,17 @@ dependencies {
     testRuntimeOnly(libs.scalatestplus.junit5)
 }
 
-// TODO: Extract shading configuration to shared buildSrc extension to avoid duplication with jdbc module
-// This configuration is intentionally duplicated from jdbc/build.gradle.kts for now to ensure both modules work
-// Future improvement: Create buildSrc/src/main/kotlin/ShadingExtensions.kt with shared functions
+// Spark shading configuration using shared script - NO DUPLICATION!
 fun com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar.configureSparkShading() {
-    val shadeBase = "com.salesforce.datacloud.shaded"
-    
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    isZip64 = true  // Enable ZIP64 for large archives
-
-    relocate("com.google", "$shadeBase.com.google")
-    relocate("io.grpc", "$shadeBase.io.grpc")
-    relocate("com.fasterxml.jackson", "$shadeBase.com.fasterxml.jackson")
-    relocate("dev.failsafe", "$shadeBase.dev.failsafe")
-    relocate("io.jsonwebtoken", "$shadeBase.io.jsonwebtoken")
-    relocate("io.netty", "$shadeBase.io.netty")
-    relocate("kotlin", "$shadeBase.kotlin")
-    relocate("okhttp3", "$shadeBase.okhttp3")
-    relocate("okio", "$shadeBase.okio")
-    relocate("org.apache.arrow", "$shadeBase.org.apache.arrow")
-    relocate("org.apache.calcite", "$shadeBase.org.apache.calcite") {
-        exclude("org.apache.calcite.avatica.remote.Driver")
-    }
-    relocate("org.apache.commons", "$shadeBase.org.apache.commons")
-    relocate("org.apache.hc", "$shadeBase.org.apache.hc")
-
-    mergeServiceFiles {
-        exclude("META-INF/services/java.sql.Driver")
-    }
-    
-    exclude("org.slf4j")
-
-    exclude("org.apache.calcite.avatica.remote.Driver")
-    exclude("META-INF/LICENSE*")
-    exclude("META-INF/NOTICE*")
-    exclude("META-INF/DEPENDENCIES")
-    exclude("META-INF/maven/**")
-    exclude("META-INF/services/com.fasterxml.*")
-    exclude("META-INF/*.xml")
-    exclude("META-INF/*.SF")
-    exclude("META-INF/*.DSA")
-    exclude("META-INF/*.RSA")
-    exclude(".netbeans_automatic_build")
-    exclude("git.properties")
-    exclude("google-http-client.properties")
-    exclude("storage.v1.json")
-    exclude("pipes-fork-server-default-log4j2.xml")
-    exclude("dependencies.properties")
-    exclude("**/*.proto")
-    exclude("arrow-git.properties")
-    
-    // Spark-specific exclusions (user provides Spark and Scala)
-    exclude("org/apache/spark/**")
-    exclude("scala/**")
-    exclude("org/scala-lang/**")
+    (project.ext["applySparkShading"] as groovy.lang.Closure<*>).call(this)
 }
 
 // Default JAR with no classifier but is shaded 
 tasks.shadowJar {
+    // Force include all runtime dependencies (especially project dependencies)
+    from(project.configurations.runtimeClasspath.get().map { 
+        if (it.isDirectory()) it else zipTree(it) 
+    })
     archiveBaseName = "spark-datasource"
     archiveClassifier = ""
     configureSparkShading()

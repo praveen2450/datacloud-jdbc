@@ -13,4 +13,5 @@ dependencies {
     implementation("de.undercouch.download:de.undercouch.download.gradle.plugin:5.6.0")
     implementation("dev.adamko.dev-publish:dev.adamko.dev-publish.gradle.plugin:0.4.2")
     implementation("com.diffplug.spotless:com.diffplug.spotless.gradle.plugin:7.2.1")
+    implementation("com.gradleup.shadow:shadow-gradle-plugin:9.0.2")
 }

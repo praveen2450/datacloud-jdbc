@@ -19,3 +19,7 @@ val configureDataCloudShading = extensions.extraProperties["configureDataCloudSh
 val sparkZip64Enabled = extensions.extraProperties["SPARK_ZIP64_ENABLED"] as Boolean
 val sparkAdditionalExclusions = extensions.extraProperties["SPARK_ADDITIONAL_EXCLUSIONS"] as List<String>
 configureDataCloudShading(sparkZip64Enabled, sparkAdditionalExclusions)
+
+// Configure JAR artifacts (main, shaded, original)
+val configureJarArtifacts = extensions.extraProperties["configureJarArtifacts"] as Project.() -> Unit
+configureJarArtifacts()

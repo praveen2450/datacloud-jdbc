@@ -1,4 +1,11 @@
 import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.api.tasks.bundling.Jar
+import org.gradle.kotlin.dsl.*
+import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.api.publish.PublishingExtension
+import org.gradle.api.Project
+import org.gradle.api.file.DuplicatesStrategy
 
 plugins {
     java
@@ -99,12 +106,11 @@ extensions.extraProperties["configureDataCloudShading"] = fun Project.(zip64: Bo
 }
 
 tasks.withType<ShadowJar>().configureEach {
-    archiveClassifier.set("")
-    archiveVersion.set("")
-
+    // Common configuration for all ShadowJar tasks
     isReproducibleFileOrder = true
     isPreserveFileTimestamps = false
     isZip64 = shadingEnableZip64.get()
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     
     // Default service file merging with exclusions
     mergeServiceFiles {
@@ -129,62 +135,40 @@ tasks.withType<ShadowJar>().configureEach {
     }
 }
 
-// Configure jar replacement and assemble task dependencies
-afterEvaluate {
-    if (shadingReplaceMainJar.get()) {
-        tasks.named<Jar>("jar").configure { enabled = false }
-        
-        // Create additional shadowJar with "shaded" classifier for publishing (with version like original)
-        val shadedJar = tasks.register("shadedJar", com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar::class) {
-            from(project.the<SourceSetContainer>()["main"].output)
-            configurations = listOf(project.configurations["runtimeClasspath"])
-            archiveClassifier.set("shaded")
-            // OVERRIDE the archiveVersion.set("") from withType<ShadowJar> to restore version
-            // This will produce: jdbc-0.30.0-LOCAL-shaded.jar (like original)
-            archiveVersion.set(project.version.toString())
-        // Apply same configuration as main shadowJar
-        isReproducibleFileOrder = true
-        isPreserveFileTimestamps = false
-        isZip64 = shadingEnableZip64.get()
-        mergeServiceFiles {
-            include("META-INF/services/*")
-            shadingServiceFileExcludes.get().forEach { excludePattern ->
-                exclude(excludePattern)
-            }
-        }
-        shadingExcludes.get().forEach { exclude(it) }
-        shadingRelocations.get().forEach { pkg ->
-            if (pkg == "org.apache.calcite") {
-                // Special case: exclude avatica driver from calcite relocation
-                relocate(pkg, "com.salesforce.datacloud.shaded.$pkg") {
-                    exclude("org.apache.calcite.avatica.remote.Driver")
-                }
-            } else {
-                relocate(pkg, "com.salesforce.datacloud.shaded.$pkg")
-            }
-        }
-        }
-        
-        tasks.named("assemble").configure { 
-            dependsOn(tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>())
-            dependsOn(shadedJar)
-        }
-        
-        // Make shadowJar the main artifact for project dependencies
-        configurations.named("runtimeElements").configure {
-            outgoing.artifacts.clear()
-            outgoing.artifact(tasks.named("shadowJar"))
-        }
-        configurations.named("apiElements").configure {
-            outgoing.artifacts.clear()
-            outgoing.artifact(tasks.named("shadowJar"))
-        }
-        
-        // Configure publishing to include the shaded JAR
+// Extension function to configure JAR artifacts (main, shaded, original)
+fun Project.configureJarArtifacts() {
+    // Default JAR with no classifier but is shaded to be used for DBeaver until we can update driver definition
+    tasks.named<ShadowJar>("shadowJar").configure {
+        archiveBaseName.set(project.name)
+        archiveClassifier.set("")
+        shouldRunAfter(tasks.named("jar"))
+    }
+
+    // Create an additional shadowJar with "shaded" classifier
+    val shadedJar = tasks.register<ShadowJar>("shadedJar") {
+        from(sourceSets.main.get().output)
+        configurations = listOf(project.configurations.runtimeClasspath.get())
+        archiveBaseName.set(project.name)
+        archiveClassifier.set("shaded")
+        shouldRunAfter(tasks.named("jar"))
+    }
+
+    // This is the base JAR with an "original" classifier, it's not shaded and should become the default JAR after making DBeaver use the shaded classifier
+    tasks.named<Jar>("jar").configure {
+        archiveClassifier.set("original")
+    }
+
+    tasks.named("assemble").configure {
+        dependsOn(tasks.named("shadowJar"))
+        dependsOn(shadedJar)
+    }
+
+    // Configure publishing to include the shaded JAR after evaluation
+    afterEvaluate {
         plugins.withId("maven-publish") {
-            extensions.configure<org.gradle.api.publish.PublishingExtension> {
+            extensions.configure<PublishingExtension> {
                 publications {
-                    named<org.gradle.api.publish.maven.MavenPublication>("mavenJava") {
+                    named<MavenPublication>("mavenJava") {
                         artifact(shadedJar.get()) {
                             classifier = "shaded"
                         }
@@ -193,4 +177,9 @@ afterEvaluate {
             }
         }
     }
+}
+
+// Make the function available to build scripts
+extensions.extraProperties["configureJarArtifacts"] = fun Project.() {
+    configureJarArtifacts()
 }

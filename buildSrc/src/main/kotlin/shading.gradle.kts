@@ -15,13 +15,8 @@ plugins {
 // Simple extension using extra properties
 val shadingRelocations = project.objects.listProperty(String::class.java).convention(emptyList())
 val shadingExcludes = project.objects.listProperty(String::class.java).convention(listOf("META-INF/*.SF","META-INF/*.DSA","META-INF/*.RSA"))
-val shadingEnableZip64 = project.objects.property(Boolean::class.java).convention(true)
 val shadingReplaceMainJar = project.objects.property(Boolean::class.java).convention(true)
 val shadingServiceFileExcludes = project.objects.listProperty(String::class.java).convention(emptyList())
-
-// Predefined configuration constants for common use cases
-val JDBC_ZIP64_ENABLED = false  // JDBC uses standard JAR size
-val SPARK_ZIP64_ENABLED = true  // Enable ZIP64 required for spark
 
 val JDBC_ADDITIONAL_EXCLUSIONS = emptyList<String>()  // No additional exclusions for JDBC
 val SPARK_ADDITIONAL_EXCLUSIONS = listOf(
@@ -32,19 +27,15 @@ val SPARK_ADDITIONAL_EXCLUSIONS = listOf(
 
 project.extensions.extraProperties["shadingRelocations"] = shadingRelocations
 project.extensions.extraProperties["shadingExcludes"] = shadingExcludes
-project.extensions.extraProperties["shadingEnableZip64"] = shadingEnableZip64
 project.extensions.extraProperties["shadingReplaceMainJar"] = shadingReplaceMainJar
 project.extensions.extraProperties["shadingServiceFileExcludes"] = shadingServiceFileExcludes
 
 // Make configuration constants available to build scripts
-project.extensions.extraProperties["JDBC_ZIP64_ENABLED"] = JDBC_ZIP64_ENABLED
-project.extensions.extraProperties["SPARK_ZIP64_ENABLED"] = SPARK_ZIP64_ENABLED
 project.extensions.extraProperties["JDBC_ADDITIONAL_EXCLUSIONS"] = JDBC_ADDITIONAL_EXCLUSIONS
 project.extensions.extraProperties["SPARK_ADDITIONAL_EXCLUSIONS"] = SPARK_ADDITIONAL_EXCLUSIONS
 
 // Shared configuration function to eliminate duplication between JDBC and Spark modules
 fun Project.configureDataCloudShading(
-    zip64: Boolean = true,
     additionalExclusions: List<String> = emptyList()
 ) {
     // Common relocations for both JDBC and Spark
@@ -95,21 +86,19 @@ fun Project.configureDataCloudShading(
     // Configure the properties
     (extensions.extraProperties["shadingRelocations"] as org.gradle.api.provider.ListProperty<String>).set(commonRelocations)
     (extensions.extraProperties["shadingExcludes"] as org.gradle.api.provider.ListProperty<String>).set(commonExclusions)
-    (extensions.extraProperties["shadingEnableZip64"] as org.gradle.api.provider.Property<Boolean>).set(zip64)
     (extensions.extraProperties["shadingReplaceMainJar"] as org.gradle.api.provider.Property<Boolean>).set(true)
     (extensions.extraProperties["shadingServiceFileExcludes"] as org.gradle.api.provider.ListProperty<String>).set(commonServiceFileExclusions)
 }
 
 // Make the function available to build scripts as an extension function
-extensions.extraProperties["configureDataCloudShading"] = fun Project.(zip64: Boolean, additionalExclusions: List<String>) {
-    configureDataCloudShading(zip64, additionalExclusions)
+extensions.extraProperties["configureDataCloudShading"] = fun Project.(additionalExclusions: List<String>) {
+    configureDataCloudShading(additionalExclusions)
 }
 
 tasks.withType<ShadowJar>().configureEach {
     // Common configuration for all ShadowJar tasks
     isReproducibleFileOrder = true
     isPreserveFileTimestamps = false
-    isZip64 = shadingEnableZip64.get()
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     
     // Default service file merging with exclusions

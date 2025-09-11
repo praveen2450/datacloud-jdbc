@@ -15,10 +15,9 @@ dependencies {
 }
 
 // Uses the common shading plugin defined in buildSrc module
-val configureDataCloudShading = extensions.extraProperties["configureDataCloudShading"] as Project.(Boolean, List<String>) -> Unit
-val sparkZip64Enabled = extensions.extraProperties["SPARK_ZIP64_ENABLED"] as Boolean
+val configureDataCloudShading = extensions.extraProperties["configureDataCloudShading"] as Project.(List<String>) -> Unit
 val sparkAdditionalExclusions = extensions.extraProperties["SPARK_ADDITIONAL_EXCLUSIONS"] as List<String>
-configureDataCloudShading(sparkZip64Enabled, sparkAdditionalExclusions)
+configureDataCloudShading(sparkAdditionalExclusions)
 
 // Configure JAR artifacts (main, shaded, original)
 val configureJarArtifacts = extensions.extraProperties["configureJarArtifacts"] as Project.() -> Unit

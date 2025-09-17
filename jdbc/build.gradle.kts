@@ -27,11 +27,11 @@ tasks.named("compileJava") {
     dependsOn(":jdbc-core:build")
 }
 
-// Configure shading using shared configuration function
-val configureDataCloudShading = extensions.extraProperties["configureDataCloudShading"] as Project.(List<String>) -> Unit
-val jdbcAdditionalExclusions = extensions.extraProperties["JDBC_ADDITIONAL_EXCLUSIONS"] as List<String>
-configureDataCloudShading(jdbcAdditionalExclusions)
+// Configure shading using DSL
+shading {
+    jdbc()
+}
 
-// Configure JAR artifacts (main, shaded, original)
-val configureJarArtifacts = extensions.extraProperties["configureJarArtifacts"] as Project.() -> Unit
+// Configure JAR artifacts
+val configureJarArtifacts = extensions.extraProperties["configureJarArtifacts"] as () -> Unit
 configureJarArtifacts()

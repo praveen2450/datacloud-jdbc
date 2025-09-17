@@ -14,11 +14,11 @@ dependencies {
     implementation(project(":jdbc"))
 }
 
-// Uses the common shading plugin defined in buildSrc module
-val configureDataCloudShading = extensions.extraProperties["configureDataCloudShading"] as Project.(List<String>) -> Unit
-val sparkAdditionalExclusions = extensions.extraProperties["SPARK_ADDITIONAL_EXCLUSIONS"] as List<String>
-configureDataCloudShading(sparkAdditionalExclusions)
+// Configure shading using DSL
+shading {
+    spark()
+}
 
-// Configure JAR artifacts (main, shaded, original)
-val configureJarArtifacts = extensions.extraProperties["configureJarArtifacts"] as Project.() -> Unit
+// Configure JAR artifacts
+val configureJarArtifacts = extensions.extraProperties["configureJarArtifacts"] as () -> Unit
 configureJarArtifacts()

@@ -71,47 +71,16 @@ fun com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar.configureShading(
     exclude("arrow-git.properties")
 }
 
-// Default JAR with no classifier but is shaded to be used for DBeaver until we can update driver definition
 tasks.shadowJar {
-    archiveBaseName = "jdbc"
-    archiveClassifier = ""
-    configureShading()
-    shouldRunAfter(tasks.jar)
-}
-
-// Create an additional shadowJar with "shaded" classifier
-val shadedJar = tasks.register<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadedJar") {
-    from(sourceSets.main.get().output)
-    configurations = listOf(project.configurations.runtimeClasspath.get())
     archiveBaseName = "jdbc"
     archiveClassifier = "shaded"
     configureShading()
-    shouldRunAfter(tasks.jar)
-}
-
-// This is the base JAR with an "original" classifier, it's not shaded and should become the default JAR after making DBeaver use the shaded classifier
-tasks.jar {
-    archiveClassifier = "original"
-}
-
-tasks.named("compileJava") {
-    dependsOn(":jdbc-core:build")
 }
 
 tasks.assemble {
     dependsOn(tasks.shadowJar)
-    dependsOn(shadedJar)
 }
 
-// Configure publishing to include the shaded JAR after evaluation
-afterEvaluate {
-   publishing {
-       publications {
-           named<MavenPublication>("mavenJava") {
-               artifact(shadedJar.get()) {
-                   classifier = "shaded"
-               }
-           }
-       }
-   }
+tasks.named("compileJava") {
+    dependsOn(":jdbc-core:build")
 }

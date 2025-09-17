@@ -12,7 +12,18 @@ Please check out the [examples here](jdbc-core/src/test/java/com/salesforce/data
 
 ## Getting started
 
-To add the driver to your project, add the following Maven dependency:
+Most applications should use the shaded variant to avoid dependency conflicts:
+
+```xml
+<dependency>
+    <groupId>com.salesforce.datacloud</groupId>
+    <artifactId>jdbc</artifactId>
+    <version>${jdbc.version}</version>
+    <classifier>shaded</classifier>
+</dependency>
+```
+
+If you need to manage gRPC and protos dependencies directly, use the standard JAR:
 
 ```xml
 <dependency>
@@ -21,6 +32,8 @@ To add the driver to your project, add the following Maven dependency:
     <version>${jdbc.version}</version>
 </dependency>
 ```
+
+Note: The default JAR includes generated protos compiled against specific gRPC versions. Applications using different gRPC versions may experience compatibility issues. Please use `jdbc-core` and your own proto generation.
 
 The class name for this driver is:
 

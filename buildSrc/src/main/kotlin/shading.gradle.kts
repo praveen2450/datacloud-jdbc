@@ -28,27 +28,10 @@ abstract class ShadingExtension @Inject constructor(
     fun spark() = configureShading(SPARK_ADDITIONAL_EXCLUSIONS)
     
     private fun configureShading(moduleExclusions: List<String>) {
-        val relocations = getCommonRelocations()
         val exclusions = getCommonExclusions() + moduleExclusions
         
-        configureShadowJarTasks(relocations, exclusions)
+        configureShadowJarTasks(exclusions)
     }
-    
-    private fun getCommonRelocations() = listOf(
-        "com.google",
-        "io.grpc", 
-        "com.fasterxml.jackson",
-        "dev.failsafe",
-        "io.jsonwebtoken",
-        "io.netty",
-        "kotlin",
-        "okhttp3",
-        "okio",
-        "org.apache.arrow",
-        "org.apache.calcite",
-        "org.apache.commons",
-        "org.apache.hc"
-    )
     
     private fun getCommonExclusions() = listOf(
         "META-INF/maven/**", "META-INF/DEPENDENCIES",
@@ -62,44 +45,47 @@ abstract class ShadingExtension @Inject constructor(
     )
     
     private fun configureShadowJarTasks(
-        relocations: List<String>,
         exclusions: List<String>
     ) {
         project.tasks.withType<ShadowJar>().configureEach {
+            val shadeBase = "com.salesforce.datacloud.shaded"
+            
             isReproducibleFileOrder = true
             isPreserveFileTimestamps = false
             duplicatesStrategy = DuplicatesStrategy.EXCLUDE
             
+            // JAR naming configuration
+            archiveBaseName.set(project.name)
+            archiveClassifier.set("shaded")
+            
+            relocate("com.google", "$shadeBase.com.google")
+            relocate("io.grpc", "$shadeBase.io.grpc")
+            relocate("com.fasterxml.jackson", "$shadeBase.com.fasterxml.jackson")
+            relocate("dev.failsafe", "$shadeBase.dev.failsafe")
+            relocate("io.jsonwebtoken", "$shadeBase.io.jsonwebtoken")
+            relocate("io.netty", "$shadeBase.io.netty")
+            relocate("kotlin", "$shadeBase.kotlin")
+            relocate("okhttp3", "$shadeBase.okhttp3")
+            relocate("okio", "$shadeBase.okio")
+            relocate("org.apache.arrow", "$shadeBase.org.apache.arrow")
+            relocate("org.apache.calcite", "$shadeBase.org.apache.calcite") {
+                exclude("org.apache.calcite.avatica.remote.Driver")
+            }
+            relocate("org.apache.commons", "$shadeBase.org.apache.commons")
+            relocate("org.apache.hc", "$shadeBase.org.apache.hc")
+
             mergeServiceFiles {
                 exclude("META-INF/services/java.sql.Driver")
             }
             
             exclusions.forEach { exclude(it) }
-            
-            relocations.forEach { pkg ->
-                when (pkg) {
-                    "org.apache.calcite" -> relocate(pkg, "com.salesforce.datacloud.shaded.$pkg") {
-                        exclude("org.apache.calcite.avatica.remote.Driver")
-                    }
-                    else -> relocate(pkg, "com.salesforce.datacloud.shaded.$pkg")
-                }
-            }
+        }
+        
+        // Configure assemble task dependency
+        project.tasks.named("assemble").configure {
+            dependsOn(project.tasks.named("shadowJar"))
         }
     }
 }
 
 extensions.create<ShadingExtension>("shading", project)
-
-fun Project.configureJarArtifacts() {
-    tasks.named<ShadowJar>("shadowJar").configure {
-        archiveBaseName.set(project.name)
-        archiveClassifier.set("shaded")
-    }
-    tasks.named("assemble").configure {
-        dependsOn(tasks.named("shadowJar"))
-    }
-}
-
-extensions.extraProperties["configureJarArtifacts"] = {
-    configureJarArtifacts()
-}

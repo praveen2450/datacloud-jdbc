@@ -18,7 +18,3 @@ dependencies {
 shading {
     spark()
 }
-
-// Configure JAR artifacts
-val configureJarArtifacts = extensions.extraProperties["configureJarArtifacts"] as () -> Unit
-configureJarArtifacts()

@@ -29,7 +29,7 @@ import org.apache.spark.sql.catalyst.util.SparkDateTimeUtils
   *
   * Maps JDBC types to Spark types.
   */
-object TypeMapping {
+private object TypeMapping {
 
   /** Get the Spark type for a given JDBC type.
     *

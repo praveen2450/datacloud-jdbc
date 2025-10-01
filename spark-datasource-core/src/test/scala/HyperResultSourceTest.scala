@@ -211,4 +211,50 @@ class HyperResultSourceTest
     val chunkCountMetric = metricValues(chunkCountMetricId.accumulatorId)
     assert(chunkCountMetric == "250")
   }
+
+  test("supports empty result sets with basic schema and nullable columns") {
+    val queryId = Using.Manager { use =>
+      val connection = use(hyperServerProcess.getConnection());
+      val stmt =
+        use(connection.createStatement().unwrap(classOf[DataCloudStatement]))
+      stmt.execute("""
+        SELECT 
+          1::int AS id,
+          NULL::varchar AS name,
+          NULL::decimal(10,2) AS amount,
+          NULL::timestamp AS created_at,
+          NULL::boolean AS is_active
+        WHERE 1 = 0
+      """)
+      stmt.getQueryId()
+    }.get
+
+    val df = spark.read
+      .format("com.salesforce.datacloud.spark.HyperResultSource")
+      .option("port", hyperServerProcess.getPort())
+      .option("query_id", queryId)
+      .load()
+
+    // Verify schema is correctly inferred with nullable columns
+    assert(df.schema.fields.length == 5)
+
+    val fields = df.schema.fields
+    assert(fields(0).name == "id")
+    assert(fields(0).dataType == IntegerType && !fields(0).nullable)
+    assert(fields(1).name == "name")
+    assert(fields(1).dataType == StringType && fields(1).nullable)
+    assert(fields(2).name == "amount")
+    assert(fields(2).dataType == DecimalType(10, 2) && fields(2).nullable)
+    assert(fields(3).name == "created_at")
+    assert(fields(3).dataType == TimestampType && fields(3).nullable)
+    assert(fields(4).name == "is_active")
+    assert(fields(4).dataType == BooleanType && fields(4).nullable)
+
+    // Verify no rows are returned
+    assert(df.count() == 0)
+
+    // Verify we can still perform operations on the empty DataFrame
+    val filtered = df.filter(df("amount") > 50.0)
+    assert(filtered.count() == 0)
+  }
 }

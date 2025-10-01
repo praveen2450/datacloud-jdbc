@@ -59,8 +59,14 @@ public class StreamingResultSet extends AvaticaResultSet implements DataCloudRes
     }
 
     public static StreamingResultSet of(Iterator<QueryResult> iterator, String queryId) throws DataCloudJDBCException {
+        val byteStringIterator = ProtocolMappers.fromQueryResult(iterator);
+        val channel = new ByteStringReadableByteChannel(byteStringIterator);
+        return of(channel, queryId);
+    }
+
+    private static StreamingResultSet of(ByteStringReadableByteChannel channel, String queryId)
+            throws DataCloudJDBCException {
         try {
-            val channel = new StreamingByteStringChannel(iterator);
             val reader = new ArrowStreamReader(channel, new RootAllocator(ROOT_ALLOCATOR_MB_FROM_V2));
             val schemaRoot = reader.getVectorSchemaRoot();
             val columns = toColumnMetaData(schemaRoot.getSchema().getFields());

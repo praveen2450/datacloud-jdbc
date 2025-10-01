@@ -4,20 +4,27 @@
  */
 package com.salesforce.datacloud.jdbc.core;
 
+import com.google.protobuf.ByteString;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ReadableByteChannel;
 import java.util.Iterator;
-import lombok.RequiredArgsConstructor;
-import lombok.val;
-import salesforce.cdp.hyperdb.v1.QueryResult;
+import lombok.NonNull;
 
-@RequiredArgsConstructor
-public class StreamingByteStringChannel implements ReadableByteChannel {
-    private final Iterator<QueryResult> iterator;
+/**
+ * A ReadableByteChannel that exposes an Iterator<ByteString> as a stream of bytes.
+ * This class has a single responsibility: converting ByteString iterator to byte stream.
+ */
+public class ByteStringReadableByteChannel implements ReadableByteChannel {
+    @NonNull private final Iterator<ByteString> iterator;
+
     private boolean open = true;
     private ByteBuffer currentBuffer = null;
+
+    public ByteStringReadableByteChannel(@NonNull Iterator<ByteString> iterator) {
+        this.iterator = iterator;
+    }
 
     @Override
     public int read(ByteBuffer dst) throws IOException {
@@ -30,21 +37,10 @@ public class StreamingByteStringChannel implements ReadableByteChannel {
         // Continue reading while destination has space AND we have data available
         while (dst.hasRemaining() && (iterator.hasNext() || (currentBuffer != null && currentBuffer.hasRemaining()))) {
             if (currentBuffer == null || !currentBuffer.hasRemaining()) {
-                val queryResult = iterator.next();
-                if (queryResult.hasBinaryPart()) {
-                    val data = queryResult.getBinaryPart().getData();
-                    if (!data.isEmpty()) {
-                        currentBuffer = data.asReadOnlyByteBuffer();
-                    }
-                } else {
-                    // This was a non result data query result message like a query info message.
-                    // We ignore that message here and will just try to fetch the next message in
-                    // the next loop iteration.
-                    continue;
-                }
+                currentBuffer = iterator.next().asReadOnlyByteBuffer();
             }
 
-            val bytesTransferred = transferToDestination(currentBuffer, dst);
+            int bytesTransferred = transferToDestination(currentBuffer, dst);
             totalBytesRead += bytesTransferred;
 
             // If no bytes were transferred, we can't make progress
@@ -68,13 +64,9 @@ public class StreamingByteStringChannel implements ReadableByteChannel {
     }
 
     private static int transferToDestination(ByteBuffer source, ByteBuffer destination) {
-        if (source == null) {
-            return 0;
-        }
-
         int transfer = Math.min(destination.remaining(), source.remaining());
         if (transfer > 0) {
-            val slice = source.slice();
+            ByteBuffer slice = source.slice();
             slice.limit(transfer);
             destination.put(slice);
             source.position(source.position() + transfer);

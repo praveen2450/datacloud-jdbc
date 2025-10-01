@@ -4,8 +4,12 @@
  */
 package com.salesforce.datacloud.jdbc.core;
 
+import static com.salesforce.datacloud.jdbc.exception.QueryExceptionHandler.createException;
 import static com.salesforce.datacloud.jdbc.logging.ElapsedLogger.logTimedValue;
+import static com.salesforce.datacloud.jdbc.util.ArrowUtils.toColumnMetaData;
+import static org.apache.arrow.vector.types.pojo.Schema.deserializeMessage;
 
+import com.google.protobuf.ByteString;
 import com.salesforce.datacloud.jdbc.core.partial.ChunkBased;
 import com.salesforce.datacloud.jdbc.core.partial.RowBased;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
@@ -27,6 +31,7 @@ import java.sql.DatabaseMetaData;
 import java.sql.NClob;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLClientInfoException;
 import java.sql.SQLException;
 import java.sql.SQLWarning;
@@ -35,6 +40,8 @@ import java.sql.Savepoint;
 import java.sql.Statement;
 import java.sql.Struct;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -47,7 +54,12 @@ import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
+import org.apache.arrow.vector.types.pojo.Schema;
+import org.apache.calcite.avatica.AvaticaResultSetMetaData;
+import org.apache.calcite.avatica.ColumnMetaData;
+import org.apache.calcite.avatica.Meta;
 import salesforce.cdp.hyperdb.v1.HyperServiceGrpc.HyperServiceBlockingStub;
+import salesforce.cdp.hyperdb.v1.QueryInfo;
 
 @Slf4j
 @Builder(access = AccessLevel.PRIVATE)
@@ -270,6 +282,27 @@ public class DataCloudConnection implements Connection, AutoCloseable {
 
     public DataCloudResultSet getChunkBasedResultSet(String queryId, long chunkId) throws DataCloudJDBCException {
         return getChunkBasedResultSet(queryId, chunkId, 1);
+    }
+
+    public ResultSetMetaData getSchemaForQueryId(String queryId) throws SQLException {
+        HyperGrpcClientExecutor executor = HyperGrpcClientExecutor.forSubmittedQuery(getStub());
+        Iterator<QueryInfo> infos = executor.getQuerySchema(queryId);
+
+        try {
+            Iterator<ByteString> byteStringIterator = ProtocolMappers.fromQueryInfo(infos);
+            if (!byteStringIterator.hasNext()) {
+                throw new DataCloudJDBCException("No schema data available for queryId: " + queryId);
+            }
+            Schema schema = deserializeMessage(byteStringIterator.next().asReadOnlyByteBuffer());
+            List<ColumnMetaData> columns = toColumnMetaData(schema.getFields());
+
+            // Create metadata directly without full ResultSet infrastructure
+            Meta.Signature signature = new Meta.Signature(
+                    columns, null, Collections.emptyList(), Collections.emptyMap(), null, Meta.StatementType.SELECT);
+            return new AvaticaResultSetMetaData(null, null, signature);
+        } catch (Exception ex) {
+            throw createException("Failed to fetch schema for queryId: " + queryId, ex);
+        }
     }
 
     /**

@@ -7,6 +7,8 @@ package com.salesforce.datacloud.jdbc.core;
 import static com.salesforce.datacloud.jdbc.util.PropertyParsingUtils.takeOptional;
 
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Properties;
 import lombok.Builder;
 import lombok.Getter;
@@ -36,6 +38,13 @@ public class ConnectionProperties {
     private final StatementProperties statementProperties =
             StatementProperties.builder().build();
 
+    /**
+     * Additional headers which can be sent by client as pass-through.
+     * These are parsed from properties with the "headers." prefix.
+     */
+    @Builder.Default
+    private final Map<String, String> additionalHeaders = new HashMap<>();
+
     public static ConnectionProperties defaultProperties() {
         return builder().build();
     }
@@ -54,6 +63,9 @@ public class ConnectionProperties {
         takeOptional(props, "workload").ifPresent(builder::workload);
         takeOptional(props, "externalClientContext").ifPresent(builder::externalClientContext);
         builder.statementProperties(StatementProperties.ofDestructive(props));
+
+        Map<String, String> additionalHeaders = parseAdditionalHeaders(props);
+        builder.additionalHeaders(additionalHeaders);
 
         return builder.build();
     }
@@ -75,5 +87,25 @@ public class ConnectionProperties {
         props.putAll(statementProperties.toProperties());
 
         return props;
+    }
+
+    /**
+     * Parses additional headers from properties with the "headers." prefix.
+     * Removes the parsed properties from the input Properties object.
+     */
+    private static Map<String, String> parseAdditionalHeaders(Properties props) {
+        Map<String, String> headers = new HashMap<>();
+        props.stringPropertyNames().stream()
+                .filter(key -> key.startsWith("headers."))
+                .forEach(key -> {
+                    String headerName = key.substring("headers.".length());
+                    String value = props.getProperty(key);
+                    if (!value.isEmpty()) {
+                        headers.put(headerName, value);
+                    }
+                    // Remove the property from the original Properties object
+                    props.remove(key);
+                });
+        return headers;
     }
 }

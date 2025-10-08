@@ -8,9 +8,11 @@ import static com.salesforce.datacloud.jdbc.util.PropertyParsingUtils.takeOption
 
 import com.salesforce.datacloud.jdbc.core.ConnectionProperties;
 import com.salesforce.datacloud.jdbc.core.DataCloudConnection;
+import com.salesforce.datacloud.jdbc.core.DirectDataCloudConnectionProperties;
 import com.salesforce.datacloud.jdbc.core.GrpcChannelProperties;
 import com.salesforce.datacloud.jdbc.core.JdbcDriverStubProvider;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
+import com.salesforce.datacloud.jdbc.util.DirectDataCloudConnection;
 import com.salesforce.datacloud.jdbc.util.JdbcURL;
 import com.salesforce.datacloud.jdbc.util.PropertyParsingUtils;
 import com.salesforce.datacloud.jdbc.util.SqlErrorCodes;
@@ -84,6 +86,14 @@ public class HyperDatasource implements DataSource {
             int port = jdbcUrl.getPort();
             val properties = info != null ? (Properties) info.clone() : new Properties();
             jdbcUrl.addParametersToProperties(properties);
+
+            // Check if this is a direct connection request with SSL/TLS support
+            if (DirectDataCloudConnection.isDirect(properties)) {
+                log.info("Using DirectDataCloudConnection for URL: {}", url);
+                DirectDataCloudConnectionProperties directProps = DirectDataCloudConnectionProperties.of(properties);
+                return DirectDataCloudConnection.of(url, directProps, properties);
+            }
+
             val connectionProperties = ConnectionProperties.ofDestructive(properties);
             val grpcChannelProperties = GrpcChannelProperties.ofDestructive(properties);
             String dataspace = takeOptional(properties, "dataspace").orElse("");

@@ -148,9 +148,9 @@ public final class DirectDataCloudConnection {
         switch (sslMode) {
             case DISABLED:
                 return createPlaintextChannel(uri);
-            case SYSTEM_TRUSTSTORE:
+            case DEFAULT_TLS:
                 return createSslWithSystemTrust(uri);
-            case CUSTOM_TRUST:
+            case ONE_SIDED_TLS:
             case MUTUAL_TLS:
                 return createCustomSslChannel(uri, directProps);
             default:
@@ -165,7 +165,7 @@ public final class DirectDataCloudConnection {
      * @return The SSL mode to use
      * @throws IllegalArgumentException if SSL configuration is invalid
      */
-    private static SslMode determineSslMode(DirectDataCloudConnectionProperties directProps) {
+    static SslMode determineSslMode(DirectDataCloudConnectionProperties directProps) {
         // Check for explicit SSL disable (testing only)
         if (directProps.isSslDisabledFlag()) {
             return SslMode.DISABLED;
@@ -177,24 +177,24 @@ public final class DirectDataCloudConnection {
         if (hasClientCert) {
             return SslMode.MUTUAL_TLS;
         } else if (hasTrustConfig) {
-            return SslMode.CUSTOM_TRUST;
+            return SslMode.ONE_SIDED_TLS;
         } else {
-            return SslMode.SYSTEM_TRUSTSTORE;
+            return SslMode.DEFAULT_TLS;
         }
     }
 
     /**
      * SSL/TLS connection modes supported by the DataCloud JDBC driver.
      */
-    private enum SslMode {
+    enum SslMode {
         /** SSL disabled - plaintext connection (testing only) */
         DISABLED("plaintext"),
 
         /** SSL with system truststore - default secure mode */
-        SYSTEM_TRUSTSTORE("SSL with system truststore (one-sided TLS)"),
+        DEFAULT_TLS("SSL with system truststore (one-sided TLS)"),
 
-        /** SSL with custom trust configuration - custom CA or truststore */
-        CUSTOM_TRUST("SSL with custom trust configuration (one-sided TLS)"),
+        /** SSL with custom truststore configuration - custom CA or truststore */
+        ONE_SIDED_TLS("SSL with custom truststore (one-sided TLS)"),
 
         /** SSL with mutual authentication - client certificates required */
         MUTUAL_TLS("SSL with client certificates (two-sided TLS)");
@@ -217,7 +217,7 @@ public final class DirectDataCloudConnection {
      * @param directProps Direct connection properties to check
      * @return true if truststore or CA certificate path is provided
      */
-    private static boolean hasTrustConfiguration(DirectDataCloudConnectionProperties directProps) {
+    static boolean hasTrustConfiguration(DirectDataCloudConnectionProperties directProps) {
         return !directProps.getTruststorePathValue().isEmpty()
                 || !directProps.getCaCertPathValue().isEmpty();
     }
@@ -230,7 +230,7 @@ public final class DirectDataCloudConnection {
      * @return true if both client certificate and key paths are provided
      * @throws IllegalArgumentException if client cert is provided without key or vice versa
      */
-    private static boolean hasClientCertificates(DirectDataCloudConnectionProperties directProps) {
+    static boolean hasClientCertificates(DirectDataCloudConnectionProperties directProps) {
         boolean hasClientCert = !directProps.getClientCertPathValue().isEmpty();
         boolean hasClientKey = !directProps.getClientKeyPathValue().isEmpty();
 
@@ -425,15 +425,6 @@ public final class DirectDataCloudConnection {
         if (caCertPath != null) {
             validatePemFile(caCertPath, "CA certificate");
         }
-
-        // TODO: Add advanced certificate validation for production use:
-        //  1. Cryptographic pair validation - verify client cert and private key match
-        //  2. Certificate expiration validation - check validity dates and warn about expiring certs
-        //  3. Certificate chain validation - verify client cert is signed by provided CA
-        //  4. Key algorithm validation - ensure supported algorithms (RSA, EC)
-        //  5. Certificate purpose validation - verify cert is valid for client authentication
-        //  This would catch configuration errors early with clear error messages instead of
-        //  runtime SSL handshake failures. Could be enabled via 'validate_certificates' property.
         log.debug("Certificate file validation completed successfully");
     }
 
@@ -441,10 +432,12 @@ public final class DirectDataCloudConnection {
         File file = new File(path);
         if (!file.exists()) {
             throw new DataCloudJDBCException(
-                    "File not found, ensure the file exists and the path is correct. description={}, path={}");
+                    "File not found, ensure the file exists and the path is correct. description=" + description
+                            + ", path=" + path);
         }
         if (!file.canRead()) {
-            throw new DataCloudJDBCException("File is not readable, check file permissions. description={}, path={}");
+            throw new DataCloudJDBCException(
+                    "File is not readable, check file permissions. description=" + description + ", path=" + path);
         }
         if (file.length() == 0) {
             throw new DataCloudJDBCException(description + " file is empty: " + path);

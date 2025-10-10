@@ -174,7 +174,6 @@ public class DataCloudConnection implements Connection {
         if (!dataspace.isEmpty()) {
             metadata.put(Metadata.Key.of("dataspace", Metadata.ASCII_STRING_MARSHALLER), dataspace);
         }
-
         return metadata;
     }
 

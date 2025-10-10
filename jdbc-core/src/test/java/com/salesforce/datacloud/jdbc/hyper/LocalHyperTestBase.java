@@ -67,13 +67,16 @@ public class LocalHyperTestBase implements BeforeAllCallback {
     @SneakyThrows
     public static DataCloudConnection getHyperQueryConnection(HyperServerProcess server, Properties properties) {
         val url = "jdbc:salesforce-hyper://127.0.0.1:" + server.getPort();
+        properties.setProperty("ssl.disabled", "true");
         return HyperDatasource.connectUsingProperties(url, properties);
     }
 
     @SneakyThrows
     public static DataCloudConnection getHyperQueryConnection(HyperServerProcess server) {
         val url = "jdbc:salesforce-hyper://127.0.0.1:" + server.getPort();
-        return HyperDatasource.connectUsingProperties(url, null);
+        Properties properties = new Properties();
+        properties.setProperty("ssl.disabled", "true");
+        return HyperDatasource.connectUsingProperties(url, properties);
     }
 
     public static DataCloudConnection getHyperQueryConnection(Properties properties) {
@@ -81,7 +84,9 @@ public class LocalHyperTestBase implements BeforeAllCallback {
     }
 
     public static DataCloudConnection getHyperQueryConnection() {
-        return getHyperQueryConnection(new Properties());
+        Properties properties = new Properties();
+        properties.setProperty("ssl.disabled", "true");
+        return getHyperQueryConnection(properties);
     }
 
     @Override

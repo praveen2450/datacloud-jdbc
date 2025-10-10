@@ -175,11 +175,6 @@ public class DataCloudConnection implements Connection {
             metadata.put(Metadata.Key.of("dataspace", Metadata.ASCII_STRING_MARSHALLER), dataspace);
         }
 
-        // Add additional headers from ConnectionProperties
-        connectionProperties.getAdditionalHeaders().forEach((headerName, value) -> {
-            metadata.put(Metadata.Key.of(headerName, Metadata.ASCII_STRING_MARSHALLER), value);
-        });
-
         return metadata;
     }
 

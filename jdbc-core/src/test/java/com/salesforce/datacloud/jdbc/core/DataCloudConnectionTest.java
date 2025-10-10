@@ -14,8 +14,6 @@ import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import io.grpc.ClientInterceptor;
 import io.grpc.Metadata;
 import java.sql.Connection;
-import java.util.HashMap;
-import java.util.Map;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.val;
@@ -122,38 +120,5 @@ class DataCloudConnectionTest extends InterceptedHyperTestBase {
                 .isEqualTo("jdbcv3");
         assertThat(metadata.get(Metadata.Key.of("dataspace", Metadata.ASCII_STRING_MARSHALLER)))
                 .isEqualTo("test-dataspace");
-
-        // Should not contain any additional headers
-        assertThat(connectionProperties.getAdditionalHeaders().isEmpty()).isTrue();
-    }
-
-    @Test
-    void testDeriveHeadersFromPropertiesWithAdditionalHeaders() {
-        Map<String, String> additionalHeaders = new HashMap<>();
-        additionalHeaders.put("ctx-tenant-id", "a360/falcondev/22d8c30636264f4b8b55a79a898fc968");
-        additionalHeaders.put("custom-header", "custom-value");
-        additionalHeaders.put("x-custom-header", "x-custom-value");
-
-        val connectionProperties = ConnectionProperties.builder()
-                .additionalHeaders(additionalHeaders)
-                .build();
-
-        val metadata = DataCloudConnection.deriveHeadersFromProperties("test-dataspace", connectionProperties);
-
-        // Should contain standard headers
-        assertThat(metadata.get(Metadata.Key.of("User-Agent", Metadata.ASCII_STRING_MARSHALLER)))
-                .isNotNull();
-        assertThat(metadata.get(Metadata.Key.of("x-hyperdb-workload", Metadata.ASCII_STRING_MARSHALLER)))
-                .isEqualTo("jdbcv3");
-        assertThat(metadata.get(Metadata.Key.of("dataspace", Metadata.ASCII_STRING_MARSHALLER)))
-                .isEqualTo("test-dataspace");
-
-        // Should contain additional headers
-        assertThat(metadata.get(Metadata.Key.of("ctx-tenant-id", Metadata.ASCII_STRING_MARSHALLER)))
-                .isEqualTo("a360/falcondev/22d8c30636264f4b8b55a79a898fc968");
-        assertThat(metadata.get(Metadata.Key.of("custom-header", Metadata.ASCII_STRING_MARSHALLER)))
-                .isEqualTo("custom-value");
-        assertThat(metadata.get(Metadata.Key.of("x-custom-header", Metadata.ASCII_STRING_MARSHALLER)))
-                .isEqualTo("x-custom-value");
     }
 }

@@ -5,6 +5,7 @@
 package com.salesforce.datacloud.jdbc.core;
 
 import static com.salesforce.datacloud.jdbc.util.PropertyParsingUtils.takeOptional;
+import static com.salesforce.datacloud.jdbc.util.PropertyParsingUtils.takeRequired;
 
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import io.grpc.ManagedChannelBuilder;
@@ -13,10 +14,7 @@ import io.grpc.netty.NettyChannelBuilder;
 import io.netty.handler.ssl.SslContext;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.InputStream;
 import java.security.KeyStore;
-import java.security.cert.CertificateFactory;
-import java.security.cert.X509Certificate;
 import java.util.Properties;
 import javax.net.ssl.TrustManagerFactory;
 import lombok.Builder;
@@ -48,9 +46,8 @@ public class SslProperties {
     private static final String DEFAULT_TRUSTSTORE_TYPE = "JKS";
     private static final String CA_CERT_ENTRY_NAME = "ca-cert";
 
-    // Instance fields for parsed property values
     @Builder.Default
-    private final boolean sslDisabledFlag = false;
+    private final SslMode sslMode = SslMode.DEFAULT_TLS;
 
     @Builder.Default
     private final String truststorePathValue = null;
@@ -79,24 +76,77 @@ public class SslProperties {
      * @throws DataCloudJDBCException if parsing of property values fails
      */
     public static SslProperties ofDestructive(Properties props) throws DataCloudJDBCException {
-        if (props == null) {
-            return SslProperties.builder().build();
-        }
-
         SslPropertiesBuilder builder = SslProperties.builder();
 
         // Parse SSL disabled flag
-        takeOptional(props, SSL_DISABLED).ifPresent(value -> builder.sslDisabledFlag(Boolean.parseBoolean(value)));
+        boolean sslDisabled =
+                takeOptional(props, SSL_DISABLED).map(Boolean::parseBoolean).orElse(false);
 
-        // Parse truststore properties
-        takeOptional(props, SSL_TRUSTSTORE_PATH).ifPresent(builder::truststorePathValue);
-        takeOptional(props, SSL_TRUSTSTORE_PASSWORD).ifPresent(builder::truststorePasswordValue);
-        takeOptional(props, SSL_TRUSTSTORE_TYPE).ifPresent(builder::truststoreTypeValue);
+        // If SSL is disabled, no other SSL properties are required
+        if (sslDisabled) {
+            builder.sslMode(SslMode.DISABLED);
+            return builder.build();
+        }
 
-        // Parse client certificate properties
-        takeOptional(props, SSL_CLIENT_CERT_PATH).ifPresent(builder::clientCertPathValue);
-        takeOptional(props, SSL_CLIENT_KEY_PATH).ifPresent(builder::clientKeyPathValue);
-        takeOptional(props, SSL_CA_CERT_PATH).ifPresent(builder::caCertPathValue);
+        String caCertPath = takeOptional(props, SSL_CA_CERT_PATH).orElse(null);
+
+        // Determine SSL mode and set credentials
+        if (props.containsKey(SSL_CLIENT_CERT_PATH) && props.containsKey(SSL_CLIENT_KEY_PATH)) {
+            // Client certificates present = mutual TLS
+            String clientCertPath = takeRequired(props, SSL_CLIENT_CERT_PATH);
+            String clientKeyPath = takeRequired(props, SSL_CLIENT_KEY_PATH);
+
+            validateCertificateFiles(clientCertPath, clientKeyPath, caCertPath);
+
+            builder.sslMode(SslMode.MUTUAL_TLS);
+            builder.clientCertPathValue(clientCertPath);
+            builder.clientKeyPathValue(clientKeyPath);
+
+            if (caCertPath != null) {
+                builder.caCertPathValue(caCertPath);
+            }
+
+            // Also set truststore if present
+            if (props.containsKey(SSL_TRUSTSTORE_PATH)) {
+                String truststorePath = takeRequired(props, SSL_TRUSTSTORE_PATH);
+                builder.truststorePathValue(truststorePath);
+                builder.truststorePasswordValue(
+                        takeOptional(props, SSL_TRUSTSTORE_PASSWORD).orElse(null));
+                builder.truststoreTypeValue(
+                        takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
+            }
+        } else if (props.containsKey(SSL_CLIENT_CERT_PATH) || props.containsKey(SSL_CLIENT_KEY_PATH)) {
+            // Only one client cert property present - throw error
+            if (props.containsKey(SSL_CLIENT_CERT_PATH)) {
+                throw new DataCloudJDBCException(
+                        "Client certificate provided but private key is missing. Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
+                        "28000");
+            } else {
+                throw new DataCloudJDBCException(
+                        "Client private key provided but certificate is missing. Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
+                        "28000");
+            }
+        } else if (props.containsKey(SSL_TRUSTSTORE_PATH) || caCertPath != null) {
+            // Only truststore/CA cert (no client certs) = one-sided TLS
+            builder.sslMode(SslMode.ONE_SIDED_TLS);
+
+            if (props.containsKey(SSL_TRUSTSTORE_PATH)) {
+                String truststorePath = takeRequired(props, SSL_TRUSTSTORE_PATH);
+                builder.truststorePathValue(truststorePath);
+                builder.truststorePasswordValue(
+                        takeOptional(props, SSL_TRUSTSTORE_PASSWORD).orElse(null));
+                builder.truststoreTypeValue(
+                        takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
+            }
+
+            if (caCertPath != null) {
+                validatePemFile(caCertPath, "CA certificate");
+                builder.caCertPathValue(caCertPath);
+            }
+        } else {
+            // No custom configuration = default TLS
+            builder.sslMode(SslMode.DEFAULT_TLS);
+        }
 
         return builder.build();
     }
@@ -118,32 +168,35 @@ public class SslProperties {
     public Properties toProperties() {
         Properties props = new Properties();
 
-        if (sslDisabledFlag) {
-            props.setProperty(SSL_DISABLED, String.valueOf(sslDisabledFlag));
-        }
-
-        if (truststorePathValue != null) {
-            props.setProperty(SSL_TRUSTSTORE_PATH, truststorePathValue);
-        }
-
-        if (truststorePasswordValue != null) {
-            props.setProperty(SSL_TRUSTSTORE_PASSWORD, truststorePasswordValue);
-        }
-
-        if (!truststoreTypeValue.equals(DEFAULT_TRUSTSTORE_TYPE)) {
-            props.setProperty(SSL_TRUSTSTORE_TYPE, truststoreTypeValue);
-        }
-
-        if (clientCertPathValue != null) {
-            props.setProperty(SSL_CLIENT_CERT_PATH, clientCertPathValue);
-        }
-
-        if (clientKeyPathValue != null) {
-            props.setProperty(SSL_CLIENT_KEY_PATH, clientKeyPathValue);
-        }
-
-        if (caCertPathValue != null) {
-            props.setProperty(SSL_CA_CERT_PATH, caCertPathValue);
+        // Serialize based on SSL mode
+        switch (sslMode) {
+            case DISABLED:
+                props.setProperty(SSL_DISABLED, "true");
+                break;
+            case MUTUAL_TLS:
+                if (clientCertPathValue != null) {
+                    props.setProperty(SSL_CLIENT_CERT_PATH, clientCertPathValue);
+                }
+                if (clientKeyPathValue != null) {
+                    props.setProperty(SSL_CLIENT_KEY_PATH, clientKeyPathValue);
+                }
+            case ONE_SIDED_TLS:
+                if (truststorePathValue != null) {
+                    props.setProperty(SSL_TRUSTSTORE_PATH, truststorePathValue);
+                }
+                if (truststorePasswordValue != null) {
+                    props.setProperty(SSL_TRUSTSTORE_PASSWORD, truststorePasswordValue);
+                }
+                if (!truststoreTypeValue.equals(DEFAULT_TRUSTSTORE_TYPE)) {
+                    props.setProperty(SSL_TRUSTSTORE_TYPE, truststoreTypeValue);
+                }
+                if (caCertPathValue != null) {
+                    props.setProperty(SSL_CA_CERT_PATH, caCertPathValue);
+                }
+                break;
+            case DEFAULT_TLS:
+                // No additional properties needed for default TLS
+                break;
         }
 
         return props;
@@ -154,67 +207,17 @@ public class SslProperties {
      */
     @Getter
     public enum SslMode {
-        /** SSL disabled - plaintext connection (testing only) */
-        DISABLED("plaintext"),
-
-        /** SSL with system truststore - default secure mode */
-        DEFAULT_TLS("SSL with system truststore (one-sided TLS)"),
-
-        /** SSL with custom truststore configuration - custom CA or truststore */
-        ONE_SIDED_TLS("SSL with custom truststore (one-sided TLS)"),
-
-        /** SSL with mutual authentication - client certificates required */
-        MUTUAL_TLS("SSL with client certificates (two-sided TLS)");
-
-        private final String description;
-
-        SslMode(String description) {
-            this.description = description;
-        }
-    }
-
-    /**
-     * Determines the appropriate SSL mode based on properties.
-     */
-    public SslMode determineSslMode() {
-        if (sslDisabledFlag) {
-            return SslMode.DISABLED;
-        }
-
-        boolean hasTrustConfig = hasTrustConfiguration();
-        boolean hasClientCert = hasClientCertificates();
-
-        if (hasClientCert) {
-            return SslMode.MUTUAL_TLS;
-        } else if (hasTrustConfig) {
-            return SslMode.ONE_SIDED_TLS;
-        } else {
-            return SslMode.DEFAULT_TLS;
-        }
-    }
-
-    /**
-     * Checks if custom trust configuration is provided.
-     */
-    private boolean hasTrustConfiguration() {
-        return truststorePathValue != null || caCertPathValue != null;
+        DISABLED(),
+        DEFAULT_TLS(),
+        ONE_SIDED_TLS(),
+        MUTUAL_TLS();
     }
 
     /**
      * Checks if client certificates are provided.
      */
     private boolean hasClientCertificates() {
-        boolean hasCert = clientCertPathValue != null;
-        boolean hasKey = clientKeyPathValue != null;
-
-        if (hasCert && !hasKey) {
-            throw new IllegalArgumentException("Client certificate provided but private key is missing");
-        }
-        if (!hasCert && hasKey) {
-            throw new IllegalArgumentException("Client private key provided but certificate is missing");
-        }
-
-        return hasCert && hasKey;
+        return clientCertPathValue != null && clientKeyPathValue != null;
     }
 
     /**
@@ -226,16 +229,11 @@ public class SslProperties {
      * @throws DataCloudJDBCException if channel creation fails
      */
     public ManagedChannelBuilder<?> createChannelBuilder(String host, int port) throws DataCloudJDBCException {
-        SslMode sslMode = determineSslMode();
-        String endpoint = host + ":" + port;
-
-        log.info("Creating {} connection to {}", sslMode.getDescription(), endpoint);
-
         switch (sslMode) {
             case DISABLED:
-                return createPlaintextChannelBuilder(host, port);
+                return ManagedChannelBuilder.forAddress(host, port).usePlaintext();
             case DEFAULT_TLS:
-                return createSslWithSystemTrustBuilder(host, port);
+                return NettyChannelBuilder.forAddress(host, port).useTransportSecurity();
             case ONE_SIDED_TLS:
             case MUTUAL_TLS:
                 return createCustomSslChannelBuilder(host, port);
@@ -245,170 +243,86 @@ public class SslProperties {
     }
 
     /**
-     * Creates a plaintext channel builder (no encryption).
-     */
-    private ManagedChannelBuilder<?> createPlaintextChannelBuilder(String host, int port) {
-        log.info("Creating plaintext connection to {}:{}", host, port);
-
-        return ManagedChannelBuilder.forAddress(host, port).usePlaintext();
-    }
-
-    /**
-     * Creates an SSL channel builder using system truststore.
-     */
-    private ManagedChannelBuilder<?> createSslWithSystemTrustBuilder(String host, int port) {
-        log.info("Creating SSL with system truststore (one-sided TLS) connection to {}:{}", host, port);
-
-        // Use NettyChannelBuilder for proper SSL support
-        return NettyChannelBuilder.forAddress(host, port).useTransportSecurity();
-    }
-
-    /**
      * Creates an SSL channel builder with custom trust configuration.
      * Implements proper SSL context with custom certificates and truststore.
      */
     private ManagedChannelBuilder<?> createCustomSslChannelBuilder(String host, int port)
             throws DataCloudJDBCException {
-        log.info("Creating SSL with custom configuration connection to {}:{}", host, port);
-
         try {
-            // Create SSL context with custom configuration
-            // Validation will be done in the specific SSL context creation methods
-            return createSslContextBuilder(host, port);
+            if (hasClientCertificates()) {
+                // Mutual TLS: client certificates + truststore/CA
+                if (truststorePathValue != null) {
+                    // JKS truststore + PEM client certs
+                    TrustManagerFactory tmf = createTrustManagerFactory();
+                    SslContext sslContext = GrpcSslContexts.forClient()
+                            .trustManager(tmf)
+                            .keyManager(new File(clientCertPathValue), new File(clientKeyPathValue))
+                            .build();
+                    return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
+                } else if (caCertPathValue != null) {
+                    // PEM CA cert + PEM client certs
+                    SslContext sslContext = GrpcSslContexts.forClient()
+                            .trustManager(new File(caCertPathValue))
+                            .keyManager(new File(clientCertPathValue), new File(clientKeyPathValue))
+                            .build();
+                    return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
+                } else {
+                    // System truststore + PEM client certs
+                    TrustManagerFactory tmf = createTrustManagerFactory();
+                    SslContext sslContext = GrpcSslContexts.forClient()
+                            .trustManager(tmf)
+                            .keyManager(new File(clientCertPathValue), new File(clientKeyPathValue))
+                            .build();
+                    return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
+                }
+            } else {
+                // One-sided TLS: only truststore/CA (no client certs)
+                if (truststorePathValue != null) {
+                    TrustManagerFactory tmf = createTrustManagerFactory();
+                    SslContext sslContext =
+                            GrpcSslContexts.forClient().trustManager(tmf).build();
+                    return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
+                } else if (caCertPathValue != null) {
+                    validatePemFile(caCertPathValue, "CA certificate");
+                    SslContext sslContext = GrpcSslContexts.forClient()
+                            .trustManager(new File(caCertPathValue))
+                            .build();
+                    return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
+                } else {
+                    TrustManagerFactory tmf = createTrustManagerFactory();
+                    SslContext sslContext =
+                            GrpcSslContexts.forClient().trustManager(tmf).build();
+                    return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
+                }
+            }
         } catch (Exception e) {
-            log.error("Failed to create custom SSL configuration: {}", e.getMessage(), e);
             throw new DataCloudJDBCException("Failed to create SSL configuration: " + e.getMessage(), e);
         }
     }
 
     /**
-     * Creates SSL context builder with custom certificates and truststore.
+     * Creates appropriate TrustManagerFactory based on available trust configuration.
      */
-    private ManagedChannelBuilder<?> createSslContextBuilder(String host, int port) throws DataCloudJDBCException {
-        try {
-            log.info(
-                    "Using custom SSL configuration with certificates: client_cert={}, client_key={}, ca_cert={}, truststore={}",
-                    clientCertPathValue,
-                    clientKeyPathValue,
-                    caCertPathValue,
-                    truststorePathValue);
-
-            // Create SSL context with custom configuration
-            SslContext sslContext = createSslContext();
-
-            // Use NettyChannelBuilder with custom SSL context
-            return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
-        } catch (Exception e) {
-            throw new DataCloudJDBCException("Failed to create SSL context: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Creates SSL context with custom certificates and truststore.
-     */
-    private SslContext createSslContext() throws DataCloudJDBCException {
-        try {
-            boolean hasClientCert = hasClientCertificates();
-
-            if (hasClientCert) {
-                return createTwoSidedTlsContext();
-            } else {
-                return createOneSidedTlsContext();
-            }
-        } catch (Exception e) {
-            throw new DataCloudJDBCException("Failed to create SSL context: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Creates SSL context for one-sided TLS (server authentication only).
-     */
-    private SslContext createOneSidedTlsContext() throws Exception {
+    private TrustManagerFactory createTrustManagerFactory() throws Exception {
         if (truststorePathValue != null) {
             // JKS truststore
-            log.info("Using JKS truststore for server verification: {}", truststorePathValue);
-            TrustManagerFactory tmf = createTrustManagerFactory();
-            return GrpcSslContexts.forClient().trustManager(tmf).build();
-        } else if (caCertPathValue != null) {
-            // PEM CA certificate
-            log.info("Using PEM CA certificate for server verification: {}", caCertPathValue);
-            validatePemFile(caCertPathValue, "CA certificate");
-            TrustManagerFactory tmf = createCaTrustManagerFactory();
-            return GrpcSslContexts.forClient().trustManager(tmf).build();
-        } else {
-            // System truststore (fallback)
-            log.info("Using system truststore for server verification");
-            TrustManagerFactory tmf = createSystemTrustManagerFactory();
-            return GrpcSslContexts.forClient().trustManager(tmf).build();
+            return createTrustManagerFactoryFromJksTrustStore();
         }
+        // System truststore (fallback)
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init((KeyStore) null);
+        return tmf;
     }
-
-    /**
-     * Creates SSL context for two-sided TLS (mutual authentication).
-     */
-    private SslContext createTwoSidedTlsContext() throws Exception {
-        // Validate client certificate files
-        validateCertificateFiles(clientCertPathValue, clientKeyPathValue, caCertPathValue);
-
-        if (truststorePathValue != null) {
-            // JKS truststore + PEM client certs
-            log.info("Using JKS truststore + PEM client certificates for mutual TLS");
-            TrustManagerFactory tmf = createTrustManagerFactory();
-            return GrpcSslContexts.forClient()
-                    .trustManager(tmf)
-                    .keyManager(new File(clientCertPathValue), new File(clientKeyPathValue))
-                    .build();
-        } else if (caCertPathValue != null) {
-            // PEM CA cert + PEM client certs
-            log.info("Using PEM CA certificate + PEM client certificates for mutual TLS");
-            return GrpcSslContexts.forClient()
-                    .trustManager(new File(caCertPathValue))
-                    .keyManager(new File(clientCertPathValue), new File(clientKeyPathValue))
-                    .build();
-        } else {
-            // System truststore + PEM client certs
-            log.info("Using system truststore + PEM client certificates for mutual TLS");
-            TrustManagerFactory tmf = createSystemTrustManagerFactory();
-            return GrpcSslContexts.forClient()
-                    .trustManager(tmf)
-                    .keyManager(new File(clientCertPathValue), new File(clientKeyPathValue))
-                    .build();
-        }
-    }
-
-    /**
-     * Creates TrustManagerFactory from CA certificate.
-     */
-    private TrustManagerFactory createCaTrustManagerFactory() throws DataCloudJDBCException {
-        try {
-            KeyStore trustStore = KeyStore.getInstance(KeyStore.getDefaultType());
-            trustStore.load(null, null);
-
-            // Load CA certificate
-            try (InputStream caCertStream = new FileInputStream(caCertPathValue)) {
-                CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
-                X509Certificate caCert = (X509Certificate) certFactory.generateCertificate(caCertStream);
-                trustStore.setCertificateEntry(CA_CERT_ENTRY_NAME, caCert);
-            }
-
-            return createTrustManagerFactoryFromKeyStore(trustStore);
-        } catch (Exception e) {
-            throw new DataCloudJDBCException(
-                    "Failed to create trust manager from CA certificate: " + e.getMessage(), e);
-        }
-    }
-
     /**
      * Creates TrustManagerFactory from JKS truststore.
      */
-    private TrustManagerFactory createTrustManagerFactory() throws DataCloudJDBCException {
+    private TrustManagerFactory createTrustManagerFactoryFromJksTrustStore() throws DataCloudJDBCException {
         try {
             KeyStore trustStore = KeyStore.getInstance(truststoreTypeValue);
             try (FileInputStream fis = new FileInputStream(truststorePathValue)) {
                 char[] password = truststorePasswordValue != null ? truststorePasswordValue.toCharArray() : null;
                 trustStore.load(fis, password);
             }
-
             return createTrustManagerFactoryFromKeyStore(trustStore);
         } catch (Exception e) {
             throw new DataCloudJDBCException("Failed to create trust manager from truststore: " + e.getMessage(), e);
@@ -432,23 +346,9 @@ public class SslProperties {
     }
 
     /**
-     * Creates a system TrustManagerFactory.
-     * Consolidated method for system truststore creation.
-     */
-    private TrustManagerFactory createSystemTrustManagerFactory() throws DataCloudJDBCException {
-        try {
-            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-            tmf.init((KeyStore) null);
-            return tmf;
-        } catch (Exception e) {
-            throw new DataCloudJDBCException("Failed to create system trust manager: " + e.getMessage(), e);
-        }
-    }
-
-    /**
      * Validates that a PEM file exists and is readable.
      */
-    private void validatePemFile(String path, String description) throws DataCloudJDBCException {
+    private static void validatePemFile(String path, String description) throws DataCloudJDBCException {
         File file = new File(path);
         if (!file.exists()) {
             throw new DataCloudJDBCException(
@@ -467,15 +367,8 @@ public class SslProperties {
     /**
      * Validates that all certificate files for mutual TLS exist and are readable.
      */
-    private void validateCertificateFiles(String clientCertPath, String clientKeyPath, String caCertPath)
+    private static void validateCertificateFiles(String clientCertPath, String clientKeyPath, String caCertPath)
             throws DataCloudJDBCException {
-        if (clientCertPath == null) {
-            throw new DataCloudJDBCException("Client certificate path cannot be null");
-        }
-        if (clientKeyPath == null) {
-            throw new DataCloudJDBCException("Client private key path cannot be null");
-        }
-
         validatePemFile(clientCertPath, "Client certificate");
         validatePemFile(clientKeyPath, "Client private key");
 

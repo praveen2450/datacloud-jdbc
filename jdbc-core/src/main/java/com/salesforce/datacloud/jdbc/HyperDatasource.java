@@ -49,18 +49,13 @@ public class HyperDatasource implements DataSource {
 
     private final ConnectionProperties connectionProperties;
     private final GrpcChannelProperties grpcChannelProperties;
+    private final SslProperties sslProperties;
     String dataspace;
 
     @Override
     public Connection getConnection() throws SQLException {
-        // Always use SSL - let SslProperties determine the mode
-        SslProperties sslProps = SslProperties.ofDestructive(new Properties());
-        log.info("SSL mode detected: {}", sslProps.determineSslMode().getDescription());
-
-        // Create SSL channel using SslProperties
-        ManagedChannelBuilder<?> sslChannelBuilder = sslProps.createChannelBuilder(host, port);
-        JdbcDriverStubProvider sslStubProvider = JdbcDriverStubProvider.of(sslChannelBuilder, grpcChannelProperties);
-        return DataCloudConnection.of(sslStubProvider, connectionProperties, dataspace, null);
+        return createConnection(
+                host, port, sslProperties, connectionProperties, grpcChannelProperties, dataspace, /*jdbcUrl=*/ null);
     }
 
     /**
@@ -72,6 +67,27 @@ public class HyperDatasource implements DataSource {
         // parameters are invalid. This is consistent with the behavior expected
         // by the JDBC specification.
         return url.startsWith("jdbc:salesforce-hyper:");
+    }
+
+    /**
+     * Internal utility function to create a DataCloudConnection with the given properties.
+     *
+     * The jdbcUrl is optional and will only influence `DatabaseMetaData.getURL()`.
+     * The actual connection will be created with the properties provided.
+     */
+    private static DataCloudConnection createConnection(
+            @NonNull String host,
+            int port,
+            @NonNull SslProperties sslProperties,
+            @NonNull ConnectionProperties connectionProperties,
+            @NonNull GrpcChannelProperties grpcChannelProperties,
+            @NonNull String dataspace,
+            JdbcURL jdbcUrl)
+            throws SQLException {
+        port = port == -1 ? 7483 : port;
+        ManagedChannelBuilder<?> sslChannelBuilder = sslProperties.createChannelBuilder(host, port);
+        JdbcDriverStubProvider stubProvider = JdbcDriverStubProvider.of(sslChannelBuilder, grpcChannelProperties);
+        return DataCloudConnection.of(stubProvider, connectionProperties, dataspace, jdbcUrl);
     }
 
     /**
@@ -95,7 +111,6 @@ public class HyperDatasource implements DataSource {
 
             // Always use SSL - let SslProperties determine the mode
             SslProperties sslProps = SslProperties.ofDestructive(properties);
-            log.info("SSL mode detected: {}", sslProps.determineSslMode().getDescription());
 
             // Create SSL channel using SslProperties
             ManagedChannelBuilder<?> sslChannelBuilder = sslProps.createChannelBuilder(host, port);

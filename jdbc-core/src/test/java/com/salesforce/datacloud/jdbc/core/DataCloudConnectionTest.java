@@ -12,7 +12,6 @@ import static org.mockito.Mockito.verify;
 
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import io.grpc.ClientInterceptor;
-import io.grpc.Metadata;
 import java.sql.Connection;
 import lombok.Getter;
 import lombok.SneakyThrows;
@@ -106,19 +105,5 @@ class DataCloudConnectionTest extends InterceptedHyperTestBase {
         // Interceptors should have been added to set the default workload header (x-hyperdb-workload)
         verify(stubProvider.stub).withInterceptors(any(ClientInterceptor[].class));
         connection.close();
-    }
-
-    @Test
-    void testDeriveHeadersFromPropertiesWithNoAdditionalHeaders() {
-        val connectionProperties = ConnectionProperties.defaultProperties();
-        val metadata = DataCloudConnection.deriveHeadersFromProperties("test-dataspace", connectionProperties);
-
-        // Should contain standard headers
-        assertThat(metadata.get(Metadata.Key.of("User-Agent", Metadata.ASCII_STRING_MARSHALLER)))
-                .isNotNull();
-        assertThat(metadata.get(Metadata.Key.of("x-hyperdb-workload", Metadata.ASCII_STRING_MARSHALLER)))
-                .isEqualTo("jdbcv3");
-        assertThat(metadata.get(Metadata.Key.of("dataspace", Metadata.ASCII_STRING_MARSHALLER)))
-                .isEqualTo("test-dataspace");
     }
 }

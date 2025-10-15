@@ -12,7 +12,9 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
+import com.salesforce.datacloud.jdbc.hyper.HyperServerManager;
 import com.salesforce.datacloud.jdbc.hyper.LocalHyperTestBase;
+import io.grpc.*;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Properties;
@@ -21,9 +23,11 @@ import java.util.stream.Stream;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
+import org.apache.commons.lang3.StringUtils;
 import org.assertj.core.api.AssertionsForClassTypes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import salesforce.cdp.hyperdb.v1.HyperServiceGrpc;
 
 @Slf4j
 @ExtendWith(LocalHyperTestBase.class)
@@ -155,6 +159,88 @@ public class JDBCLimitsTest {
             assertThatExceptionOfType(SQLException.class).isThrownBy(() -> {
                 statement.executeQuery("SELECT 'A'");
             });
+        }
+    }
+
+    /**
+     * The intent of this stub provider is to inject a large header that the Hyper server will also mirror back
+     * and that thus we get a large header in the _response_ from the Hyper server which we can use to test
+     * compatibility with potentially large headers coming through the response.
+     * We use the trace id header as it is one of the few headers that Hyper will send back unchanged to the caller.
+     */
+    public static class LargeHeaderChannelConfigStubProvider implements HyperGrpcStubProvider {
+        final ManagedChannel channel;
+
+        LargeHeaderChannelConfigStubProvider(int port, String traceId, boolean useJDBCChannelConfig) {
+            ManagedChannelBuilder<?> builder = ManagedChannelBuilder.forAddress("localhost", port);
+            if (useJDBCChannelConfig) {
+                val jdbcChannelProperties = GrpcChannelProperties.defaultProperties();
+                jdbcChannelProperties.applyToChannel(builder);
+            }
+            builder = builder.intercept(new ClientInterceptor() {
+                        @Override
+                        public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(
+                                MethodDescriptor<ReqT, RespT> method, CallOptions callOptions, Channel next) {
+                            return new ForwardingClientCall.SimpleForwardingClientCall<ReqT, RespT>(
+                                    next.newCall(method, callOptions)) {
+                                @Override
+                                public void start(Listener<RespT> responseListener, Metadata headers) {
+                                    // Add B3 trace ID header
+                                    headers.put(
+                                            Metadata.Key.of("x-b3-traceid", Metadata.ASCII_STRING_MARSHALLER), traceId);
+                                    super.start(responseListener, headers);
+                                }
+                            };
+                        }
+                    })
+                    .usePlaintext();
+            channel = builder.build();
+        }
+
+        @Override
+        public HyperServiceGrpc.HyperServiceBlockingStub getStub() {
+            return HyperServiceGrpc.newBlockingStub(channel);
+        }
+
+        @Override
+        public void close() {
+            channel.shutdown();
+        }
+    }
+
+    @Test
+    @SneakyThrows
+    public void testLargeResponseHeaders() {
+        // We are not allowed to close as this instance is cached
+        val server = HyperServerManager.get(HyperServerManager.ConfigFile.SMALL_CHUNKS);
+        // For this test case, we want Hyper to respond with a large header. The easiest way to do so, is by sending a
+        // large x-b3-traceid as part of the request. Hyper will copy over the trace id into its response headers.
+        // With the JDBC drivers channel config we should support close to 1 MB response header as large headers can
+        // get injected by side cars in mesh scenarios.
+        try (val connection = DataCloudConnection.of(
+                new LargeHeaderChannelConfigStubProvider(server.getPort(), StringUtils.leftPad(" ", 100 * 1024), true),
+                ConnectionProperties.defaultProperties(),
+                "dataspace/unused",
+                null)) {
+            try (val stmt = connection.createStatement()) {
+                // We just verify that we are able to get a full response
+                val result = stmt.executeQuery("SELECT 'A'");
+                result.next();
+                assertThat(result.getString(1)).isEqualTo("A");
+            }
+        }
+        // Verify that the trace id is indeed sent back by checking that the stmt fails with gRPC defaults for the
+        // channel.
+        try (val connection = DataCloudConnection.of(
+                new LargeHeaderChannelConfigStubProvider(server.getPort(), StringUtils.leftPad(" ", 100 * 1024), false),
+                ConnectionProperties.defaultProperties(),
+                "dataspace/unused",
+                null)) {
+            try (val stmt = connection.createStatement()) {
+                assertThatExceptionOfType(SQLException.class).isThrownBy(() -> {
+                    stmt.executeQuery("SELECT 'A'");
+                });
+            }
         }
     }
 

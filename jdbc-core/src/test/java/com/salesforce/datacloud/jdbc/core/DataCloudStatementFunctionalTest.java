@@ -37,17 +37,15 @@ public class DataCloudStatementFunctionalTest {
             stmt.executeAsyncQuery("select pg_sleep(5000000);");
 
             val queryId = stmt.unwrap(DataCloudStatement.class).getQueryId();
-            val a = client.waitFor(queryId, Deadline.infinite(), t -> true);
+            val a = client.waitFor(true, queryId, Deadline.infinite(), t -> true);
             assertThat(a.getCompletionStatus()).isEqualTo(QueryStatus.CompletionStatus.RUNNING);
 
             stmt.cancel();
             assertThatThrownBy(() -> {
                         conn.waitFor(queryId, QueryStatus::allResultsProduced);
-                        // We need a second try as Hyper sometimes returns results produced in the get query info call
-                        // while cancellation is happening
-                        conn.waitFor(queryId, QueryStatus::allResultsProduced);
                     })
-                    .hasMessageContaining("57014: canceled by user");
+                    .hasMessageContaining("Failed to execute query: canceled by user")
+                    .hasMessageContaining("SQLSTATE: 57014");
         }
     }
 
@@ -68,11 +66,9 @@ public class DataCloudStatementFunctionalTest {
             stmt.cancel();
             assertThatThrownBy(() -> {
                         conn.waitFor(queryId, QueryStatus::allResultsProduced);
-                        // We need a second try as Hyper sometimes returns results produced in the get query info call
-                        // while cancellation is happening
-                        conn.waitFor(queryId, QueryStatus::allResultsProduced);
                     })
-                    .hasMessageContaining("57014: canceled by user");
+                    .hasMessageContaining("Failed to execute query: canceled by user")
+                    .hasMessageContaining("SQLSTATE: 57014");
         }
     }
 
@@ -92,11 +88,9 @@ public class DataCloudStatementFunctionalTest {
             conn.cancelQuery(queryId);
             assertThatThrownBy(() -> {
                         conn.waitFor(queryId, QueryStatus::allResultsProduced);
-                        // We need a second try as Hyper sometimes returns results produced in the get query info call
-                        // while cancellation is happening
-                        conn.waitFor(queryId, QueryStatus::allResultsProduced);
                     })
-                    .hasMessageStartingWith("57014: canceled by user");
+                    .hasMessageContaining("Failed to execute query: canceled by user")
+                    .hasMessageContaining("SQLSTATE: 57014");
         }
     }
 

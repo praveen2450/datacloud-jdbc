@@ -11,7 +11,6 @@ import com.salesforce.datacloud.jdbc.core.DataCloudConnection;
 import com.salesforce.datacloud.jdbc.core.GrpcChannelProperties;
 import com.salesforce.datacloud.jdbc.core.JdbcDriverStubProvider;
 import com.salesforce.datacloud.jdbc.core.SslProperties;
-import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import com.salesforce.datacloud.jdbc.util.JdbcURL;
 import com.salesforce.datacloud.jdbc.util.PropertyParsingUtils;
 import com.salesforce.datacloud.jdbc.util.SqlErrorCodes;
@@ -98,7 +97,7 @@ public class HyperDatasource implements DataSource {
         log.info("connect url={}", url);
 
         if (!acceptsURL(url)) {
-            throw new DataCloudJDBCException("Invalid URL. URL must start with 'jdbc:salesforce-hyper:'");
+            throw new SQLException("Invalid URL. URL must start with 'jdbc:salesforce-hyper:'");
         }
 
         try {
@@ -128,33 +127,33 @@ public class HyperDatasource implements DataSource {
 
     @Override
     public Connection getConnection(String username, String password) throws SQLException {
-        throw new DataCloudJDBCException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
     public PrintWriter getLogWriter() throws SQLException {
-        throw new DataCloudJDBCException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
     public void setLogWriter(PrintWriter out) throws SQLException {
-        throw new DataCloudJDBCException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
     public void setLoginTimeout(int seconds) throws SQLException {
-        throw new DataCloudJDBCException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
     public int getLoginTimeout() throws SQLException {
-        throw new DataCloudJDBCException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @SneakyThrows
     @Override
     public Logger getParentLogger() {
-        throw new DataCloudJDBCException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override

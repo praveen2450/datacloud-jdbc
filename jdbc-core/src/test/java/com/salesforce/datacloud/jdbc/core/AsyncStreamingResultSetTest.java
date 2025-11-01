@@ -40,10 +40,10 @@ public class AsyncStreamingResultSetTest {
                     }
                 })
                 .isInstanceOf(DataCloudJDBCException.class)
-                .hasMessageContaining("HINT:")
-                .hasMessageContaining("42P01: table \"nonsense\" does not exist")
+                .hasMessageContaining("table \"nonsense\" does not exist")
+                .hasMessageContaining("SQLSTATE: 42P01")
                 .hasCauseInstanceOf(StatusRuntimeException.class)
-                .hasRootCauseMessage("FAILED_PRECONDITION: table \"nonsense\" does not exist");
+                .hasRootCauseMessage("INVALID_ARGUMENT: table \"nonsense\" does not exist");
     }
 
     @Test
@@ -87,8 +87,8 @@ public class AsyncStreamingResultSetTest {
             rs.next();
 
             assertThat(rs.getInt(1)).isEqualTo(8);
-        } catch (StatusRuntimeException e) {
-            Assertions.fail(e);
+        } catch (StatusRuntimeException ex) {
+            Assertions.fail(ex);
         }
     }
 }

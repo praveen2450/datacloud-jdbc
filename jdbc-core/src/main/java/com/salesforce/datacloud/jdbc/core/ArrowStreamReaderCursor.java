@@ -4,11 +4,9 @@
  */
 package com.salesforce.datacloud.jdbc.core;
 
-import static com.salesforce.datacloud.jdbc.exception.QueryExceptionHandler.createException;
 import static com.salesforce.datacloud.jdbc.util.ThrowingFunction.rethrowFunction;
 
 import com.salesforce.datacloud.jdbc.core.accessor.QueryJDBCAccessorFactory;
-import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import java.io.IOException;
 import java.sql.SQLException;
 import java.util.Calendar;
@@ -61,14 +59,10 @@ class ArrowStreamReaderCursor extends AbstractCursor {
         return QueryJDBCAccessorFactory.createAccessor(vector, currentIndex::get, this::wasNullConsumer);
     }
 
-    private boolean loadNextBatch() throws SQLException {
-        try {
-            if (reader.loadNextBatch()) {
-                currentIndex.set(0);
-                return true;
-            }
-        } catch (IOException e) {
-            throw new DataCloudJDBCException(e);
+    private boolean loadNextBatch() throws IOException {
+        if (reader.loadNextBatch()) {
+            currentIndex.set(0);
+            return true;
         }
         return false;
     }
@@ -86,7 +80,12 @@ class ArrowStreamReaderCursor extends AbstractCursor {
             }
             return next;
         } catch (Exception e) {
-            throw createException("Failed to load next batch", e);
+            // This can happen due to SneakyThrows.
+            if (e instanceof SQLException) {
+                throw e;
+            } else {
+                throw new SQLException("Failed to load next batch: " + e.getMessage(), e);
+            }
         }
     }
 

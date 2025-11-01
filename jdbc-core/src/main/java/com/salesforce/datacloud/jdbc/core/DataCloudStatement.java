@@ -6,26 +6,25 @@ package com.salesforce.datacloud.jdbc.core;
 
 import static com.salesforce.datacloud.jdbc.logging.ElapsedLogger.logTimedValue;
 
-import com.salesforce.datacloud.jdbc.core.fsm.AdaptiveQueryResultIterator;
-import com.salesforce.datacloud.jdbc.core.fsm.AsyncQueryResultHandle;
-import com.salesforce.datacloud.jdbc.core.fsm.QueryResultHandle;
-import com.salesforce.datacloud.jdbc.core.fsm.QueryResultIterator;
-import com.salesforce.datacloud.jdbc.core.partial.RowBased;
-import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
+import com.salesforce.datacloud.jdbc.exception.QueryExceptionHandler;
+import com.salesforce.datacloud.jdbc.protocol.*;
 import com.salesforce.datacloud.jdbc.util.QueryTimeout;
 import com.salesforce.datacloud.jdbc.util.SqlErrorCodes;
 import com.salesforce.datacloud.query.v3.QueryStatus;
+import io.grpc.StatusRuntimeException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.SQLWarning;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.concurrent.TimeUnit;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
+import salesforce.cdp.hyperdb.v1.QueryParam;
 
 @Slf4j
 public class DataCloudStatement implements Statement, AutoCloseable {
@@ -59,7 +58,7 @@ public class DataCloudStatement implements Statement, AutoCloseable {
         this.statementProperties = connection.getConnectionProperties().getStatementProperties();
     }
 
-    protected HyperGrpcClientExecutor getQueryClient(QueryTimeout queryTimeout) throws DataCloudJDBCException {
+    protected HyperGrpcClientExecutor getQueryClient(QueryTimeout queryTimeout) throws SQLException {
         val stub = connection.getStub();
         val querySettings = new HashMap<>(statementProperties.getQuerySettings());
         if (!queryTimeout.getServerQueryTimeout().isZero()) {
@@ -70,11 +69,11 @@ public class DataCloudStatement implements Statement, AutoCloseable {
     }
 
     @Getter
-    protected QueryResultHandle queryHandle;
+    protected QueryAccessHandle queryHandle;
 
-    private void assertQueryExecuted() throws DataCloudJDBCException {
+    private void assertQueryExecuted() throws SQLException {
         if (queryHandle == null) {
-            throw new DataCloudJDBCException("a query was not executed before attempting to access results");
+            throw new SQLException("a query was not executed before attempting to access results");
         }
     }
 
@@ -82,63 +81,109 @@ public class DataCloudStatement implements Statement, AutoCloseable {
      * @return The Data Cloud query id of the last executed query from this statement.
      * @throws SQLException throws an exception if a query has not been executed from this statement
      */
-    public String getQueryId() throws DataCloudJDBCException {
+    public String getQueryId() throws SQLException {
         assertQueryExecuted();
-        return queryHandle.getQueryId();
+        return queryHandle.getQueryStatus().getQueryId();
     }
 
     @Override
     public boolean execute(String sql) throws SQLException {
         log.debug("Entering execute");
-        resultSet = executeAdaptiveQuery(sql);
+        try {
+            executeAdaptiveQuery(sql);
+        } catch (StatusRuntimeException ex) {
+            String queryId = null;
+            if (queryHandle != null && queryHandle.getQueryStatus() != null) {
+                queryId = queryHandle.getQueryStatus().getQueryId();
+            }
+            val includeCustomerDetail = connection.getConnectionProperties().isIncludeCustomerDetailInReason();
+            throw QueryExceptionHandler.createException(includeCustomerDetail, sql, queryId, ex);
+        }
         return true;
     }
 
     @Override
     public ResultSet executeQuery(String sql) throws SQLException {
         log.debug("Entering executeQuery");
-        resultSet = executeAdaptiveQuery(sql);
-        return resultSet;
+        val includeCustomerDetail = connection.getConnectionProperties().isIncludeCustomerDetailInReason();
+        try {
+            val iterator = executeAdaptiveQuery(sql);
+            val arrowStream = SQLExceptionQueryResultIterator.createSqlExceptionArrowStreamReader(
+                    iterator, includeCustomerDetail, iterator.getQueryStatus().getQueryId(), sql);
+            resultSet =
+                    StreamingResultSet.of(arrowStream, iterator.getQueryStatus().getQueryId());
+            log.info(
+                    "executeAdaptiveQuery completed. queryId={}",
+                    queryHandle.getQueryStatus().getQueryId());
+            return (DataCloudResultSet) resultSet;
+        } catch (StatusRuntimeException ex) {
+            String queryId = null;
+            if (queryHandle != null && queryHandle.getQueryStatus() != null) {
+                queryId = queryHandle.getQueryStatus().getQueryId();
+            }
+            throw QueryExceptionHandler.createException(includeCustomerDetail, sql, queryId, ex);
+        }
     }
 
-    private DataCloudResultSet executeAdaptiveQuery(String sql) throws SQLException {
+    private QueryResultIterator executeAdaptiveQuery(String sql) throws SQLException {
         val queryTimeout = QueryTimeout.of(
                 statementProperties.getQueryTimeout(), statementProperties.getQueryTimeoutLocalEnforcementDelay());
         val client = getQueryClient(queryTimeout);
+        val queryParam = targetMaxRows > 0
+                ? client.getAdaptiveRowLimitQueryParams(sql, targetMaxRows, targetMaxBytes)
+                : client.getAdaptiveQueryParams(sql);
+        val stub = client.getStub()
+                .withDeadlineAfter(
+                        queryTimeout.getLocalDeadline().getRemaining().toMillis(), TimeUnit.MILLISECONDS);
+        val iterator = QueryResultIterator.of(stub, queryParam);
+        queryHandle = iterator;
+        // Ensure query status is initialized
+        iterator.hasNext();
+        return iterator;
+    }
 
-        queryHandle = targetMaxRows > 0
-                ? AdaptiveQueryResultIterator.of(sql, client, queryTimeout, targetMaxRows, targetMaxBytes)
-                : AdaptiveQueryResultIterator.of(sql, client, queryTimeout);
+    protected void executeAsyncQueryInternal(String sql) throws SQLException {
+        val includeCustomerDetail = connection.getConnectionProperties().isIncludeCustomerDetailInReason();
+        try {
+            val queryTimeout = QueryTimeout.of(
+                    statementProperties.getQueryTimeout(), statementProperties.getQueryTimeoutLocalEnforcementDelay());
+            val client = getQueryClient(queryTimeout);
+            val request = client.getQueryParams(sql, QueryParam.TransferMode.ASYNC);
+            val stub = client.getStub()
+                    .withDeadlineAfter(
+                            queryTimeout.getLocalDeadline().getRemaining().toMillis(), TimeUnit.MILLISECONDS);
 
-        resultSet = StreamingResultSet.of((AdaptiveQueryResultIterator) queryHandle);
-        log.info("executeAdaptiveQuery completed. queryId={}", queryHandle.getQueryId());
-        return (DataCloudResultSet) resultSet;
+            // We set the deadline based off the query timeout here as the server-side doesn't properly enforce
+            // the query timeout during the initial compilation phase. By setting the deadline, we can ensure
+            // that the query timeout is enforced also when the server hangs during compilation.
+            queryHandle = AsyncQueryAccessHandle.of(stub, request);
+            log.info(
+                    "executeAsyncQuery completed. queryId={}",
+                    queryHandle.getQueryStatus().getQueryId());
+        } catch (StatusRuntimeException ex) {
+            String queryId = null;
+            if (queryHandle != null && queryHandle.getQueryStatus() != null) {
+                queryId = queryHandle.getQueryStatus().getQueryId();
+            }
+            throw QueryExceptionHandler.createException(includeCustomerDetail, sql, queryId, ex);
+        }
     }
 
     public DataCloudStatement executeAsyncQuery(String sql) throws SQLException {
-        log.debug("Entering executeAsyncQuery");
-        val queryTimeout = QueryTimeout.of(
-                statementProperties.getQueryTimeout(), statementProperties.getQueryTimeoutLocalEnforcementDelay());
-        val client = getQueryClient(queryTimeout);
-        queryHandle = AsyncQueryResultHandle.of(sql, client, queryTimeout);
-        log.info("executeAsyncQuery completed. queryId={}", queryHandle.getQueryId());
+        executeAsyncQueryInternal(sql);
         return this;
     }
 
     @Override
     public int executeUpdate(String sql) throws SQLException {
-        throw new DataCloudJDBCException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(NOT_SUPPORTED_IN_DATACLOUD_QUERY, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
     public void close() throws SQLException {
         log.debug("Entering close");
         if (resultSet != null) {
-            try {
-                resultSet.close();
-            } catch (SQLException e) {
-                throw new DataCloudJDBCException(e);
-            }
+            resultSet.close();
         }
         log.debug("Exiting close");
     }
@@ -151,8 +196,9 @@ public class DataCloudStatement implements Statement, AutoCloseable {
     @Override
     public void setMaxFieldSize(int max) {}
 
-    public void clearResultSetConstraints() throws DataCloudJDBCException {
-        setResultSetConstraints(0, RowBased.HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
+    public void clearResultSetConstraints() throws SQLException {
+        targetMaxRows = 0;
+        targetMaxBytes = 0;
     }
 
     /**
@@ -161,20 +207,23 @@ public class DataCloudStatement implements Statement, AutoCloseable {
      *
      * @param maxRows The maximum number of rows a ResultSet can have, zero means there is no limit.
      * @param maxBytes The maximum byte size a ResultSet can be,
-     *                 must fall in the range {@link RowBased#HYPER_MIN_ROW_LIMIT_BYTE_SIZE}
-     *                 and {@link RowBased#HYPER_MAX_ROW_LIMIT_BYTE_SIZE}
-     * @throws DataCloudJDBCException If the target maximum byte size is outside the aforementioned range
+     *                 must fall in the range {@link RowRangeIterator#HYPER_MIN_ROW_LIMIT_BYTE_SIZE}
+     *                 and {@link RowRangeIterator#HYPER_MAX_ROW_LIMIT_BYTE_SIZE}
+     * @throws SQLException If the target maximum byte size is outside the aforementioned range
      */
-    public void setResultSetConstraints(int maxRows, int maxBytes) throws DataCloudJDBCException {
+    public void setResultSetConstraints(int maxRows, int maxBytes) throws SQLException {
         if (maxRows < 0) {
-            throw new DataCloudJDBCException(
+            throw new SQLException(
                     "setResultSetConstraints maxRows must be set to 0 to be disabled but was " + maxRows);
         }
 
-        if (maxBytes < RowBased.HYPER_MIN_ROW_LIMIT_BYTE_SIZE || maxBytes > RowBased.HYPER_MAX_ROW_LIMIT_BYTE_SIZE) {
-            throw new DataCloudJDBCException(String.format(
+        if (maxBytes < RowRangeIterator.HYPER_MIN_ROW_LIMIT_BYTE_SIZE
+                || maxBytes > RowRangeIterator.HYPER_MAX_ROW_LIMIT_BYTE_SIZE) {
+            throw new SQLException(String.format(
                     "The specified maxBytes (%d) must satisfy the following constraints: %d >= x >= %d",
-                    maxBytes, RowBased.HYPER_MIN_ROW_LIMIT_BYTE_SIZE, RowBased.HYPER_MAX_ROW_LIMIT_BYTE_SIZE));
+                    maxBytes,
+                    RowRangeIterator.HYPER_MIN_ROW_LIMIT_BYTE_SIZE,
+                    RowRangeIterator.HYPER_MAX_ROW_LIMIT_BYTE_SIZE));
         }
 
         targetMaxRows = maxRows;
@@ -185,8 +234,8 @@ public class DataCloudStatement implements Statement, AutoCloseable {
      * @see DataCloudStatement#setResultSetConstraints
      * @param maxRows The target maximum number of rows a ResultSet can have, zero means there is no limit.
      */
-    public void setResultSetConstraints(int maxRows) throws DataCloudJDBCException {
-        setResultSetConstraints(maxRows, RowBased.HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
+    public void setResultSetConstraints(int maxRows) throws SQLException {
+        setResultSetConstraints(maxRows, RowRangeIterator.HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
     }
 
     @Override
@@ -227,14 +276,13 @@ public class DataCloudStatement implements Statement, AutoCloseable {
      * Cancels the most recently executed query from this statement.
      */
     @Override
-    public void cancel() throws DataCloudJDBCException {
+    public void cancel() throws SQLException {
         if (queryHandle == null) {
             log.warn("There was no in-progress query registered with this statement to cancel");
             return;
         }
 
-        val queryId = getQueryId();
-        HyperGrpcClientExecutor.forSubmittedQuery(connection.getStub()).cancel(queryId);
+        connection.cancelQuery(getQueryId());
     }
 
     @Override
@@ -250,23 +298,39 @@ public class DataCloudStatement implements Statement, AutoCloseable {
 
     @Override
     public ResultSet getResultSet() throws SQLException {
-        return logTimedValue(
-                () -> {
-                    assertQueryExecuted();
-                    if (resultSet == null && queryHandle instanceof QueryResultIterator) {
-                        resultSet = StreamingResultSet.of((QueryResultIterator) queryHandle);
-                    } else if (resultSet == null) {
-                        log.warn(
-                                "Prefer acquiring async result sets from helper methods DataCloudConnection::getChunkBasedResultSet and DataCloudConnection::getRowBasedResultSet. We will wait for the query's results to be produced in their entirety before returning a result set.");
-                        val status = connection.waitFor(queryHandle.getQueryId(), QueryStatus::allResultsProduced);
-                        resultSet =
-                                connection.getChunkBasedResultSet(queryHandle.getQueryId(), 0, status.getChunkCount());
-                    }
-                    log.info("resultSet created for queryId={}", queryHandle.getQueryId());
-                    return resultSet;
-                },
-                "getResultSet",
-                log);
+        assertQueryExecuted();
+        val includeCustomerDetail = connection.getConnectionProperties().isIncludeCustomerDetailInReason();
+        try {
+            return logTimedValue(
+                    () -> {
+                        if (resultSet == null && queryHandle instanceof QueryResultIterator) {
+                            val adaptiveIter = (QueryResultIterator) queryHandle;
+                            val arrowStream = SQLExceptionQueryResultIterator.createSqlExceptionArrowStreamReader(
+                                    adaptiveIter,
+                                    includeCustomerDetail,
+                                    adaptiveIter.getQueryStatus().getQueryId(),
+                                    null);
+                            resultSet = StreamingResultSet.of(
+                                    arrowStream, adaptiveIter.getQueryStatus().getQueryId());
+                        } else if (resultSet == null) {
+                            log.warn(
+                                    "Prefer acquiring async result sets from helper methods DataCloudConnection::getChunkBasedResultSet and DataCloudConnection::getRowBasedResultSet. We will wait for the query's results to be produced in their entirety before returning a result set.");
+                            val status = connection.waitFor(
+                                    queryHandle.getQueryStatus().getQueryId(), QueryStatus::allResultsProduced);
+                            resultSet = connection.getChunkBasedResultSet(
+                                    queryHandle.getQueryStatus().getQueryId(), 0, status.getChunkCount());
+                        }
+                        log.info(
+                                "resultSet created for queryId={}",
+                                queryHandle.getQueryStatus().getQueryId());
+                        return resultSet;
+                    },
+                    "getResultSet",
+                    log);
+        } catch (StatusRuntimeException ex) {
+            throw QueryExceptionHandler.createException(
+                    includeCustomerDetail, null, queryHandle.getQueryStatus().getQueryId(), ex);
+        }
     }
 
     @Override
@@ -281,7 +345,7 @@ public class DataCloudStatement implements Statement, AutoCloseable {
 
     @Override
     public void setFetchDirection(int direction) throws SQLException {
-        throw new DataCloudJDBCException(CHANGE_FETCH_DIRECTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(CHANGE_FETCH_DIRECTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
@@ -312,17 +376,17 @@ public class DataCloudStatement implements Statement, AutoCloseable {
 
     @Override
     public void addBatch(String sql) throws SQLException {
-        throw new DataCloudJDBCException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
     public void clearBatch() throws SQLException {
-        throw new DataCloudJDBCException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
     public int[] executeBatch() throws SQLException {
-        throw new DataCloudJDBCException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
@@ -337,32 +401,32 @@ public class DataCloudStatement implements Statement, AutoCloseable {
 
     @Override
     public int executeUpdate(String sql, int autoGeneratedKeys) throws SQLException {
-        throw new DataCloudJDBCException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
     public int executeUpdate(String sql, int[] columnIndexes) throws SQLException {
-        throw new DataCloudJDBCException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
     public int executeUpdate(String sql, String[] columnNames) throws SQLException {
-        throw new DataCloudJDBCException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
     public boolean execute(String sql, int autoGeneratedKeys) throws SQLException {
-        throw new DataCloudJDBCException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
     public boolean execute(String sql, int[] columnIndexes) throws SQLException {
-        throw new DataCloudJDBCException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
     public boolean execute(String sql, String[] columnNames) throws SQLException {
-        throw new DataCloudJDBCException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
+        throw new SQLException(BATCH_EXECUTION_IS_NOT_SUPPORTED, SqlErrorCodes.FEATURE_NOT_SUPPORTED);
     }
 
     @Override
@@ -396,7 +460,7 @@ public class DataCloudStatement implements Statement, AutoCloseable {
         if (iFace.isInstance(this)) {
             return iFace.cast(this);
         }
-        throw new DataCloudJDBCException("Cannot unwrap to " + iFace.getName());
+        throw new SQLException("Cannot unwrap to " + iFace.getName());
     }
 
     @Override

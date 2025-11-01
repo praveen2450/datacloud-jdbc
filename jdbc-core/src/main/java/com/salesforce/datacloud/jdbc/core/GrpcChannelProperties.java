@@ -12,9 +12,10 @@ import static com.salesforce.datacloud.jdbc.util.PropertyParsingUtils.takeOption
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
+import com.salesforce.datacloud.jdbc.protocol.grpc.HyperGrpcChannelSettings;
 import com.salesforce.datacloud.jdbc.util.Unstable;
 import io.grpc.ManagedChannelBuilder;
+import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -62,8 +63,6 @@ public class GrpcChannelProperties {
     public static final String GRPC_RETRY_POLICY_BACKOFF_MULTIPLIER = "grpc.retryPolicy.backoffMultiplier";
     public static final String GRPC_RETRY_POLICY_RETRYABLE_STATUS_CODES = "grpc.retryPolicy.retryableStatusCodes";
 
-    private static final int GRPC_INBOUND_MESSAGE_MAX_SIZE = 64 * 1024 * 1024;
-
     // Keep alive properties
     @Builder.Default
     private final boolean keepAliveEnabled = false;
@@ -110,7 +109,7 @@ public class GrpcChannelProperties {
      * @param props The properties to parse
      * @return A GrpcChannelProperties instance
      */
-    public static GrpcChannelProperties ofDestructive(Properties props) throws DataCloudJDBCException {
+    public static GrpcChannelProperties ofDestructive(Properties props) throws SQLException {
         GrpcChannelPropertiesBuilder builder = GrpcChannelProperties.builder();
 
         // Keep alive properties
@@ -130,7 +129,7 @@ public class GrpcChannelProperties {
                         GRPC_KEEP_ALIVE_TIMEOUT,
                         GRPC_IDLE_TIMEOUT_SECONDS,
                         GRPC_KEEP_ALIVE_WITHOUT_CALLS))) {
-            throw new DataCloudJDBCException(
+            throw new SQLException(
                     "grpc.keepAlive must be set to true if grpc.keepAlive.to use any of the grpc.keepAlive.* properties",
                     "HY000");
         }
@@ -153,7 +152,7 @@ public class GrpcChannelProperties {
                         GRPC_RETRY_POLICY_MAX_BACKOFF,
                         GRPC_RETRY_POLICY_BACKOFF_MULTIPLIER,
                         GRPC_RETRY_POLICY_RETRYABLE_STATUS_CODES))) {
-            throw new DataCloudJDBCException(
+            throw new SQLException(
                     "grpc.enableRetries must be set to true if grpc.retryPolicy.* properties are used", "HY000");
         }
 
@@ -210,7 +209,7 @@ public class GrpcChannelProperties {
      */
     public void applyToChannel(ManagedChannelBuilder<?> builder) {
         // General, setting-independent setup
-        builder.maxInboundMessageSize(GRPC_INBOUND_MESSAGE_MAX_SIZE);
+        HyperGrpcChannelSettings.applyToBuilder(builder);
         builder.userAgent(formatDriverInfo());
 
         // Keep alive settings

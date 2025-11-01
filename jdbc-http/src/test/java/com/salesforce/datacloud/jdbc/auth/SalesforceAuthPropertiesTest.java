@@ -8,8 +8,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import java.net.URI;
+import java.sql.SQLException;
 import java.util.Properties;
 import org.junit.jupiter.api.Test;
 
@@ -54,7 +54,7 @@ class SalesforceAuthPropertiesTest {
                     + "-----END PRIVATE KEY-----";
 
     @Test
-    void parsesPasswordAuthenticationProperties() throws DataCloudJDBCException {
+    void parsesPasswordAuthenticationProperties() throws SQLException {
         Properties props = new Properties();
         props.setProperty("clientId", TEST_CLIENT_ID);
         props.setProperty("clientSecret", TEST_CLIENT_SECRET);
@@ -74,10 +74,9 @@ class SalesforceAuthPropertiesTest {
     }
 
     @Test
-    void parsesPrivateKeyAuthenticationProperties() throws DataCloudJDBCException {
+    void parsesPrivateKeyAuthenticationProperties() throws SQLException {
         Properties props = new Properties();
         props.setProperty("clientId", TEST_CLIENT_ID);
-        props.setProperty("clientSecret", TEST_CLIENT_SECRET);
         props.setProperty("userName", TEST_USER_NAME);
         props.setProperty("privateKey", FAKE_PRIVATE_KEY);
         props.setProperty("dataspace", TEST_DATASPACE);
@@ -88,14 +87,26 @@ class SalesforceAuthPropertiesTest {
         assertThat(authProps.getAuthenticationMode())
                 .isEqualTo(SalesforceAuthProperties.AuthenticationMode.PRIVATE_KEY);
         assertThat(authProps.getClientId()).isEqualTo(TEST_CLIENT_ID);
-        assertThat(authProps.getClientSecret()).isEqualTo(TEST_CLIENT_SECRET);
         assertThat(authProps.getUserName()).isEqualTo(TEST_USER_NAME);
         assertThat(authProps.getPrivateKey()).isNotNull();
         assertThat(authProps.getDataspace()).isEqualTo(TEST_DATASPACE);
     }
 
     @Test
-    void parsesRefreshTokenAuthenticationProperties() throws DataCloudJDBCException {
+    void rejectsClientSecretForPrivateKeyAuthenticationMode() {
+        Properties props = new Properties();
+        props.setProperty("clientId", TEST_CLIENT_ID);
+        props.setProperty("clientSecret", TEST_CLIENT_SECRET); // clientSecret should NOT be provided
+        props.setProperty("userName", TEST_USER_NAME);
+        props.setProperty("privateKey", FAKE_PRIVATE_KEY);
+
+        assertThatThrownBy(() -> SalesforceAuthProperties.ofDestructive(TEST_LOGIN_URL, props))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("clientSecret is not allowed for PRIVATE_KEY/JWT authentication mode");
+    }
+
+    @Test
+    void parsesRefreshTokenAuthenticationProperties() throws SQLException {
         Properties props = new Properties();
         props.setProperty("clientId", TEST_CLIENT_ID);
         props.setProperty("clientSecret", TEST_CLIENT_SECRET);
@@ -114,7 +125,7 @@ class SalesforceAuthPropertiesTest {
     }
 
     @Test
-    void parsesRefreshTokenWithOptionalUserName() throws DataCloudJDBCException {
+    void parsesRefreshTokenWithOptionalUserName() throws SQLException {
         Properties props = new Properties();
         props.setProperty("clientId", TEST_CLIENT_ID);
         props.setProperty("clientSecret", TEST_CLIENT_SECRET);
@@ -130,7 +141,7 @@ class SalesforceAuthPropertiesTest {
     }
 
     @Test
-    void parsesPropertiesWithoutDataspace() throws DataCloudJDBCException {
+    void parsesPropertiesWithoutDataspace() throws SQLException {
         Properties props = new Properties();
         props.setProperty("clientId", TEST_CLIENT_ID);
         props.setProperty("clientSecret", TEST_CLIENT_SECRET);
@@ -143,7 +154,7 @@ class SalesforceAuthPropertiesTest {
     }
 
     @Test
-    void toPropertiesRoundtripPasswordAuthentication() throws DataCloudJDBCException {
+    void toPropertiesRoundtripPasswordAuthentication() throws SQLException {
         Properties props = new Properties();
         props.setProperty("clientId", TEST_CLIENT_ID);
         props.setProperty("clientSecret", TEST_CLIENT_SECRET);
@@ -159,10 +170,9 @@ class SalesforceAuthPropertiesTest {
     }
 
     @Test
-    void toPropertiesRoundtripPrivateKeyAuthentication() throws DataCloudJDBCException {
+    void toPropertiesRoundtripPrivateKeyAuthentication() throws SQLException {
         Properties props = new Properties();
         props.setProperty("clientId", TEST_CLIENT_ID);
-        props.setProperty("clientSecret", TEST_CLIENT_SECRET);
         props.setProperty("userName", TEST_USER_NAME);
         props.setProperty("privateKey", FAKE_PRIVATE_KEY);
         props.setProperty("dataspace", TEST_DATASPACE);
@@ -175,7 +185,7 @@ class SalesforceAuthPropertiesTest {
     }
 
     @Test
-    void toPropertiesRoundtripRefreshTokenAuthentication() throws DataCloudJDBCException {
+    void toPropertiesRoundtripRefreshTokenAuthentication() throws SQLException {
         Properties props = new Properties();
         props.setProperty("clientId", TEST_CLIENT_ID);
         props.setProperty("clientSecret", TEST_CLIENT_SECRET);
@@ -197,7 +207,7 @@ class SalesforceAuthPropertiesTest {
         // Missing all authentication credentials
 
         assertThatThrownBy(() -> SalesforceAuthProperties.ofDestructive(TEST_LOGIN_URL, props))
-                .isInstanceOf(DataCloudJDBCException.class)
+                .isInstanceOf(SQLException.class)
                 .hasMessageContaining(
                         "Properties must contain either (userName + password), (userName + privateKey), or refreshToken");
     }
@@ -212,7 +222,7 @@ class SalesforceAuthPropertiesTest {
         props.setProperty("privateKey", FAKE_PRIVATE_KEY); // Mixed with password
 
         assertThatThrownBy(() -> SalesforceAuthProperties.ofDestructive(TEST_LOGIN_URL, props))
-                .isInstanceOf(DataCloudJDBCException.class)
+                .isInstanceOf(SQLException.class)
                 .hasMessageContaining("Properties from different authentication modes cannot be mixed");
     }
 
@@ -220,12 +230,11 @@ class SalesforceAuthPropertiesTest {
     void rejectsInvalidPrivateKeyFormat() {
         Properties props = new Properties();
         props.setProperty("clientId", TEST_CLIENT_ID);
-        props.setProperty("clientSecret", TEST_CLIENT_SECRET);
         props.setProperty("userName", TEST_USER_NAME);
         props.setProperty("privateKey", "invalid-key-format");
 
         assertThatThrownBy(() -> SalesforceAuthProperties.ofDestructive(TEST_LOGIN_URL, props))
-                .isInstanceOf(DataCloudJDBCException.class)
+                .isInstanceOf(SQLException.class)
                 .hasMessageContaining("Private key must be in PEM format");
     }
 
@@ -233,18 +242,17 @@ class SalesforceAuthPropertiesTest {
     void rejectsCorruptedPrivateKey() {
         Properties props = new Properties();
         props.setProperty("clientId", TEST_CLIENT_ID);
-        props.setProperty("clientSecret", TEST_CLIENT_SECRET);
         props.setProperty("userName", TEST_USER_NAME);
         props.setProperty(
                 "privateKey", "-----BEGIN PRIVATE KEY-----\ninvalid-base64-content\n-----END PRIVATE KEY-----");
 
         assertThatThrownBy(() -> SalesforceAuthProperties.ofDestructive(TEST_LOGIN_URL, props))
-                .isInstanceOf(DataCloudJDBCException.class)
+                .isInstanceOf(SQLException.class)
                 .hasMessageContaining("Failed to parse private key");
     }
 
     @Test
-    void acceptsKnownLoginUrlPatterns() throws DataCloudJDBCException {
+    void acceptsKnownLoginUrlPatterns() {
         String[] knownHosts = {
             "login.salesforce.com",
             "test.salesforce.com",
@@ -260,7 +268,7 @@ class SalesforceAuthPropertiesTest {
     }
 
     @Test
-    void warnsOnUnknownLoginUrl() throws DataCloudJDBCException {
+    void warnsOnUnknownLoginUrl() throws SQLException {
         Properties props = new Properties();
         props.setProperty("clientId", TEST_CLIENT_ID);
         props.setProperty("clientSecret", TEST_CLIENT_SECRET);
@@ -278,7 +286,6 @@ class SalesforceAuthPropertiesTest {
     void privateKeySerializationRoundtrip() throws Exception {
         Properties originalProps = new Properties();
         originalProps.setProperty("clientId", TEST_CLIENT_ID);
-        originalProps.setProperty("clientSecret", TEST_CLIENT_SECRET);
         originalProps.setProperty("userName", TEST_USER_NAME);
         originalProps.setProperty("privateKey", FAKE_PRIVATE_KEY);
 

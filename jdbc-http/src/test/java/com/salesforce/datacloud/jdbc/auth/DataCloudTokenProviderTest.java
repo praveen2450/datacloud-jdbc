@@ -13,7 +13,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salesforce.datacloud.jdbc.auth.errors.AuthorizationException;
 import com.salesforce.datacloud.jdbc.auth.model.DataCloudTokenResponse;
 import com.salesforce.datacloud.jdbc.auth.model.OAuthTokenResponse;
-import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import com.salesforce.datacloud.jdbc.http.HttpClientProperties;
 import java.sql.SQLException;
 import java.util.Properties;
@@ -47,7 +46,6 @@ class DataCloudTokenProviderTest {
     static Properties propertiesForPrivateKey(String userName, String privateKey) {
         val properties = new Properties();
         properties.setProperty(SalesforceAuthProperties.AUTH_CLIENT_ID, "clientId");
-        properties.setProperty(SalesforceAuthProperties.AUTH_CLIENT_SECRET, "clientSecret");
         properties.setProperty(SalesforceAuthProperties.AUTH_USER_NAME, userName);
         properties.setProperty(SalesforceAuthProperties.AUTH_PRIVATE_KEY, privateKey);
         return properties;
@@ -78,7 +76,7 @@ class DataCloudTokenProviderTest {
             val loginUrl = server.url("").uri();
             HttpClientProperties clientProperties = HttpClientProperties.ofDestructive(properties);
             SalesforceAuthProperties authProperties = SalesforceAuthProperties.ofDestructive(loginUrl, properties);
-            assertThrows(DataCloudJDBCException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
+            assertThrows(SQLException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
                     .getOAuthToken());
             assertThat(server.getRequestCount()).isEqualTo(expectedTriesCount);
             server.shutdown();
@@ -99,7 +97,7 @@ class DataCloudTokenProviderTest {
             val loginUrl = server.url("").uri();
             HttpClientProperties clientProperties = HttpClientProperties.ofDestructive(properties);
             SalesforceAuthProperties authProperties = SalesforceAuthProperties.ofDestructive(loginUrl, properties);
-            assertThrows(DataCloudJDBCException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
+            assertThrows(SQLException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
                     .getOAuthToken());
             assertThat(server.getRequestCount()).isEqualTo(1);
             server.shutdown();
@@ -229,9 +227,8 @@ class DataCloudTokenProviderTest {
             val loginUrl = server.url("").uri();
             HttpClientProperties clientProperties = HttpClientProperties.ofDestructive(properties);
             SalesforceAuthProperties authProperties = SalesforceAuthProperties.ofDestructive(loginUrl, properties);
-            val ex = assertThrows(
-                    DataCloudJDBCException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
-                            .getDataCloudToken());
+            val ex = assertThrows(SQLException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
+                    .getDataCloudToken());
 
             assertAuthorizationException(
                     ex,
@@ -257,9 +254,8 @@ class DataCloudTokenProviderTest {
             val loginUrl = server.url("").uri();
             HttpClientProperties clientProperties = HttpClientProperties.ofDestructive(properties);
             SalesforceAuthProperties authProperties = SalesforceAuthProperties.ofDestructive(loginUrl, properties);
-            val ex = assertThrows(
-                    DataCloudJDBCException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
-                            .getDataCloudToken());
+            val ex = assertThrows(SQLException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
+                    .getDataCloudToken());
 
             assertSQLException(ex, "Received an error when acquiring oauth access token, no token in response.");
         }
@@ -287,9 +283,8 @@ class DataCloudTokenProviderTest {
             val loginUrl = server.url("").uri();
             HttpClientProperties clientProperties = HttpClientProperties.ofDestructive(properties);
             SalesforceAuthProperties authProperties = SalesforceAuthProperties.ofDestructive(loginUrl, properties);
-            val ex = assertThrows(
-                    DataCloudJDBCException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
-                            .getDataCloudToken());
+            val ex = assertThrows(SQLException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
+                    .getDataCloudToken());
 
             assertSQLException(
                     ex,
@@ -313,9 +308,8 @@ class DataCloudTokenProviderTest {
             val loginUrl = server.url("").uri();
             HttpClientProperties clientProperties = HttpClientProperties.ofDestructive(properties);
             SalesforceAuthProperties authProperties = SalesforceAuthProperties.ofDestructive(loginUrl, properties);
-            val ex = assertThrows(
-                    DataCloudJDBCException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
-                            .getDataCloudToken());
+            val ex = assertThrows(SQLException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
+                    .getDataCloudToken());
 
             assertSQLException(ex, "Received an error when acquiring oauth access token, no token in response.");
         }
@@ -340,9 +334,8 @@ class DataCloudTokenProviderTest {
             val loginUrl = server.url("").uri();
             HttpClientProperties clientProperties = HttpClientProperties.ofDestructive(properties);
             SalesforceAuthProperties authProperties = SalesforceAuthProperties.ofDestructive(loginUrl, properties);
-            val ex = assertThrows(
-                    DataCloudJDBCException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
-                            .getDataCloudToken());
+            val ex = assertThrows(SQLException.class, () -> DataCloudTokenProvider.of(clientProperties, authProperties)
+                    .getDataCloudToken());
 
             assertSQLException(
                     ex,
@@ -442,14 +435,14 @@ class DataCloudTokenProviderTest {
 
     private static void assertAuthorizationException(Throwable actual, CharSequence... messages) {
         AssertionsForClassTypes.assertThat(actual)
-                .isInstanceOf(DataCloudJDBCException.class)
+                .isInstanceOf(SQLException.class)
                 .hasMessageContainingAll(messages)
                 .hasRootCauseInstanceOf(AuthorizationException.class);
     }
 
     private static void assertSQLException(Throwable actual, CharSequence... messages) {
         AssertionsForClassTypes.assertThat(actual)
-                .isInstanceOf(DataCloudJDBCException.class)
+                .isInstanceOf(SQLException.class)
                 .hasMessageContainingAll(messages)
                 .hasRootCauseInstanceOf(SQLException.class);
     }

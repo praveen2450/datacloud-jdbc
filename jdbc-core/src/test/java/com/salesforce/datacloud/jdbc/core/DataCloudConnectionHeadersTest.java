@@ -6,9 +6,10 @@ package com.salesforce.datacloud.jdbc.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
+import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
 import io.grpc.inprocess.InProcessChannelBuilder;
+import java.sql.SQLException;
 import java.util.Properties;
 import org.junit.jupiter.api.Test;
 import salesforce.cdp.hyperdb.v1.HyperServiceGrpc;
@@ -30,18 +31,20 @@ class DataCloudConnectionHeadersTest {
         }
 
         @Override
-        public void close() {}
+        public void close() {
+            ((ManagedChannel) stub.getChannel()).shutdownNow();
+        }
     }
 
     @Test
-    void deriveHeaders_defaultsOnlyWorkload() throws DataCloudJDBCException {
+    void deriveHeaders_defaultsOnlyWorkload() throws SQLException {
         ConnectionProperties cp = ConnectionProperties.ofDestructive(new Properties());
         Metadata md = DataCloudConnection.deriveHeadersFromProperties("", cp);
         assertThat(md.keys()).containsExactly("user-agent", "x-hyperdb-workload");
     }
 
     @Test
-    void deriveHeaders_allFieldsPresent() throws DataCloudJDBCException {
+    void deriveHeaders_allFieldsPresent() throws SQLException {
         Properties props = new Properties();
         props.setProperty("workload", "wl");
         props.setProperty("externalClientContext", "{}");
@@ -50,22 +53,26 @@ class DataCloudConnectionHeadersTest {
         Metadata md = DataCloudConnection.deriveHeadersFromProperties("ds", cp);
         assertThat(md.keys())
                 .containsExactlyInAnyOrder(
-                        "user-agent", "x-hyperdb-workload", "x-hyperdb-external-client-context", "dataspace");
+                        "user-agent",
+                        "x-hyperdb-workload",
+                        "x-hyperdb-external-client-context",
+                        "ctx-dataspace-ds_name");
         assertThat(md.get(Metadata.Key.of("x-hyperdb-workload", Metadata.ASCII_STRING_MARSHALLER)))
                 .isEqualTo("wl");
         assertThat(md.get(Metadata.Key.of("x-hyperdb-external-client-context", Metadata.ASCII_STRING_MARSHALLER)))
                 .isEqualTo("{}");
-        assertThat(md.get(Metadata.Key.of("dataspace", Metadata.ASCII_STRING_MARSHALLER)))
+        assertThat(md.get(Metadata.Key.of("ctx-dataspace-ds_name", Metadata.ASCII_STRING_MARSHALLER)))
                 .isEqualTo("ds");
     }
 
     @Test
-    void getStub_attachesInterceptors_andHonorsNetworkTimeout() throws DataCloudJDBCException {
+    void getStub_attachesInterceptors_andHonorsNetworkTimeout() throws SQLException {
         Properties props = new Properties();
         props.setProperty("workload", "wl");
-        DataCloudConnection conn =
-                DataCloudConnection.of(new TestStubProvider(), ConnectionProperties.ofDestructive(props), "", null);
-        conn.setNetworkTimeout(null, 1000);
-        assertThat(conn.getStub()).isNotNull();
+        try (DataCloudConnection conn =
+                DataCloudConnection.of(new TestStubProvider(), ConnectionProperties.ofDestructive(props), "", null)) {
+            conn.setNetworkTimeout(null, 1000);
+            assertThat(conn.getStub()).isNotNull();
+        }
     }
 }

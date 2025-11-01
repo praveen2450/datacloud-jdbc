@@ -4,7 +4,7 @@
  */
 package com.salesforce.datacloud.jdbc.logging;
 
-import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
+import com.salesforce.datacloud.jdbc.util.NonThrowingJdbcSupplier;
 import com.salesforce.datacloud.jdbc.util.ThrowingJdbcSupplier;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -17,22 +17,33 @@ public final class ElapsedLogger {
     }
 
     public static <T> T logTimedValue(ThrowingJdbcSupplier<T> supplier, String name, Logger logger)
-            throws DataCloudJDBCException {
-        val start = System.currentTimeMillis();
+            throws SQLException {
+        val start = System.nanoTime();
         try {
             logger.info("Starting name={}", name);
             val result = supplier.get();
-            val elapsed = System.currentTimeMillis() - start;
-            logger.info("Success name={}, millis={}, duration={}", name, elapsed, Duration.ofMillis(elapsed));
+            val elapsed = System.nanoTime() - start;
+            logger.info("Success name={}, millis={}, duration={}", name, elapsed, Duration.ofNanos(elapsed));
             return result;
-        } catch (DataCloudJDBCException e) {
-            val elapsed = System.currentTimeMillis() - start;
-            logger.error("Failed name={}, millis={}, duration={}", name, elapsed, Duration.ofMillis(elapsed), e);
-            throw e;
         } catch (SQLException e) {
-            val elapsed = System.currentTimeMillis() - start;
-            logger.error("Failed name={}, millis={}, duration={}", name, elapsed, Duration.ofMillis(elapsed), e);
-            throw new DataCloudJDBCException(e);
+            val elapsed = System.nanoTime() - start;
+            logger.info("Failed name={}, millis={}, duration={}", name, elapsed, Duration.ofNanos(elapsed), e);
+            throw e;
+        }
+    }
+
+    public static <T> T logTimedValueNonThrowing(NonThrowingJdbcSupplier<T> supplier, String name, Logger logger) {
+        val start = System.nanoTime();
+        try {
+            logger.info("Starting name={}", name);
+            val result = supplier.get();
+            val elapsed = System.nanoTime() - start;
+            logger.info("Success name={}, millis={}, duration={}", name, elapsed, Duration.ofNanos(elapsed));
+            return result;
+        } catch (Exception e) {
+            val elapsed = System.nanoTime() - start;
+            logger.info("Failed name={}, millis={}, duration={}", name, elapsed, Duration.ofNanos(elapsed), e);
+            throw e;
         }
     }
 }

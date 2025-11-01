@@ -23,8 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * SSL/TLS properties for DataCloud JDBC connections.
- * Supports automatic SSL mode detection based on provided certificate properties.
- */
+ * */
 @Slf4j
 @Getter
 @Builder
@@ -68,10 +67,10 @@ public class SslProperties {
     private final String caCertPathValue = null;
 
     /**
-     * Parses SSL properties from a Properties object using destructive parsing.
-     * This method removes the SSL properties from the input Properties object.
+     * Parses connection properties from a Properties object.
+     * Removes the interpreted properties from the Properties object.
      *
-     * @param props The properties to parse (will be modified)
+     * @param props The properties to parse
      * @return A SslProperties instance
      * @throws SQLException if parsing of property values fails
      */
@@ -82,7 +81,7 @@ public class SslProperties {
         boolean sslDisabled =
                 takeOptional(props, SSL_DISABLED).map(Boolean::parseBoolean).orElse(false);
 
-        // If SSL is disabled, no other SSL properties are required
+        // If SSL is disabled, no other SSL properties are required.
         if (sslDisabled) {
             builder.sslMode(SslMode.DISABLED);
             return builder.build();
@@ -92,7 +91,7 @@ public class SslProperties {
 
         // Determine SSL mode and set credentials
         if (props.containsKey(SSL_CLIENT_CERT_PATH) && props.containsKey(SSL_CLIENT_KEY_PATH)) {
-            // Client certificates present = mutual TLS
+            // Client certificates present, use mutual TLS
             String clientCertPath = takeRequired(props, SSL_CLIENT_CERT_PATH);
             String clientKeyPath = takeRequired(props, SSL_CLIENT_KEY_PATH);
 
@@ -116,7 +115,6 @@ public class SslProperties {
                         takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
             }
         } else if (props.containsKey(SSL_CLIENT_CERT_PATH) || props.containsKey(SSL_CLIENT_KEY_PATH)) {
-            // Only one client cert property present - throw error
             if (props.containsKey(SSL_CLIENT_CERT_PATH)) {
                 throw new SQLException(
                         "Client certificate provided but private key is missing. Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
@@ -127,7 +125,7 @@ public class SslProperties {
                         "28000");
             }
         } else if (props.containsKey(SSL_TRUSTSTORE_PATH) || caCertPath != null) {
-            // Only truststore/CA cert (no client certs) = one-sided TLS
+            // Only truststore/CA cert (no client certs), use one-sided TLS
             builder.sslMode(SslMode.ONE_SIDED_TLS);
 
             if (props.containsKey(SSL_TRUSTSTORE_PATH)) {
@@ -144,18 +142,13 @@ public class SslProperties {
                 builder.caCertPathValue(caCertPath);
             }
         } else {
-            // No custom configuration = default TLS
+            // No custom configuration provided, use default TLS
             builder.sslMode(SslMode.DEFAULT_TLS);
         }
 
         return builder.build();
     }
 
-    /**
-     * Returns default SSL properties.
-     *
-     * @return A SslProperties instance with default values
-     */
     public static SslProperties defaultProperties() {
         return builder().build();
     }
@@ -214,13 +207,6 @@ public class SslProperties {
     }
 
     /**
-     * Checks if client certificates are provided.
-     */
-    private boolean hasClientCertificates() {
-        return clientCertPathValue != null && clientKeyPathValue != null;
-    }
-
-    /**
      * Creates a gRPC channel builder with appropriate SSL/TLS configuration.
      *
      * @param host The target host
@@ -248,7 +234,7 @@ public class SslProperties {
      */
     private ManagedChannelBuilder<?> createCustomSslChannelBuilder(String host, int port) throws SQLException {
         try {
-            if (hasClientCertificates()) {
+            if (clientCertPathValue != null && clientKeyPathValue != null) {
                 // Mutual TLS: client certificates + truststore/CA
                 if (truststorePathValue != null) {
                     // JKS truststore + PEM client certs
@@ -299,39 +285,25 @@ public class SslProperties {
         }
     }
 
-    /**
-     * Creates appropriate TrustManagerFactory based on available trust configuration.
-     */
     private TrustManagerFactory createTrustManagerFactory() throws Exception {
         if (truststorePathValue != null) {
-            // JKS truststore
-            return createTrustManagerFactoryFromJksTrustStore();
+            try {
+                KeyStore trustStore = KeyStore.getInstance(truststoreTypeValue);
+                try (FileInputStream fis = new FileInputStream(truststorePathValue)) {
+                    char[] password = truststorePasswordValue != null ? truststorePasswordValue.toCharArray() : null;
+                    trustStore.load(fis, password);
+                }
+                return createTrustManagerFactoryFromKeyStore(trustStore);
+            } catch (Exception e) {
+                throw new SQLException("Failed to create trust manager from truststore: " + e.getMessage(), "HY000", e);
+            }
         }
         // System truststore (fallback)
         TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
         tmf.init((KeyStore) null);
         return tmf;
     }
-    /**
-     * Creates TrustManagerFactory from JKS truststore.
-     */
-    private TrustManagerFactory createTrustManagerFactoryFromJksTrustStore() throws SQLException {
-        try {
-            KeyStore trustStore = KeyStore.getInstance(truststoreTypeValue);
-            try (FileInputStream fis = new FileInputStream(truststorePathValue)) {
-                char[] password = truststorePasswordValue != null ? truststorePasswordValue.toCharArray() : null;
-                trustStore.load(fis, password);
-            }
-            return createTrustManagerFactoryFromKeyStore(trustStore);
-        } catch (Exception e) {
-            throw new SQLException("Failed to create trust manager from truststore: " + e.getMessage(), "HY000", e);
-        }
-    }
 
-    /**
-     * Creates TrustManagerFactory from a KeyStore.
-     * Consolidated method to avoid code duplication.
-     */
     private TrustManagerFactory createTrustManagerFactoryFromKeyStore(KeyStore trustStore) throws SQLException {
         try {
             TrustManagerFactory trustManagerFactory =
@@ -343,9 +315,6 @@ public class SslProperties {
         }
     }
 
-    /**
-     * Validates that a PEM file exists and is readable.
-     */
     private static void validatePemFile(String path, String description) throws SQLException {
         File file = new File(path);
         if (!file.exists()) {
@@ -364,9 +333,6 @@ public class SslProperties {
         }
     }
 
-    /**
-     * Validates that all certificate files for mutual TLS exist and are readable.
-     */
     private static void validateCertificateFiles(String clientCertPath, String clientKeyPath, String caCertPath)
             throws SQLException {
         validatePemFile(clientCertPath, "Client certificate");

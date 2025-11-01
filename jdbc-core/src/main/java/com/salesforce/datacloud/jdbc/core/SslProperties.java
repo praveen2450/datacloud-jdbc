@@ -7,7 +7,6 @@ package com.salesforce.datacloud.jdbc.core;
 import static com.salesforce.datacloud.jdbc.util.PropertyParsingUtils.takeOptional;
 import static com.salesforce.datacloud.jdbc.util.PropertyParsingUtils.takeRequired;
 
-import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.netty.GrpcSslContexts;
 import io.grpc.netty.NettyChannelBuilder;
@@ -15,6 +14,7 @@ import io.netty.handler.ssl.SslContext;
 import java.io.File;
 import java.io.FileInputStream;
 import java.security.KeyStore;
+import java.sql.SQLException;
 import java.util.Properties;
 import javax.net.ssl.TrustManagerFactory;
 import lombok.Builder;
@@ -73,9 +73,9 @@ public class SslProperties {
      *
      * @param props The properties to parse (will be modified)
      * @return A SslProperties instance
-     * @throws DataCloudJDBCException if parsing of property values fails
+     * @throws SQLException if parsing of property values fails
      */
-    public static SslProperties ofDestructive(Properties props) throws DataCloudJDBCException {
+    public static SslProperties ofDestructive(Properties props) throws SQLException {
         SslPropertiesBuilder builder = SslProperties.builder();
 
         // Parse SSL disabled flag
@@ -118,11 +118,11 @@ public class SslProperties {
         } else if (props.containsKey(SSL_CLIENT_CERT_PATH) || props.containsKey(SSL_CLIENT_KEY_PATH)) {
             // Only one client cert property present - throw error
             if (props.containsKey(SSL_CLIENT_CERT_PATH)) {
-                throw new DataCloudJDBCException(
+                throw new SQLException(
                         "Client certificate provided but private key is missing. Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
                         "28000");
             } else {
-                throw new DataCloudJDBCException(
+                throw new SQLException(
                         "Client private key provided but certificate is missing. Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
                         "28000");
             }
@@ -226,9 +226,9 @@ public class SslProperties {
      * @param host The target host
      * @param port The target port
      * @return Configured ManagedChannelBuilder
-     * @throws DataCloudJDBCException if channel creation fails
+     * @throws SQLException if channel creation fails
      */
-    public ManagedChannelBuilder<?> createChannelBuilder(String host, int port) throws DataCloudJDBCException {
+    public ManagedChannelBuilder<?> createChannelBuilder(String host, int port) throws SQLException {
         switch (sslMode) {
             case DISABLED:
                 return ManagedChannelBuilder.forAddress(host, port).usePlaintext();
@@ -246,8 +246,7 @@ public class SslProperties {
      * Creates an SSL channel builder with custom trust configuration.
      * Implements proper SSL context with custom certificates and truststore.
      */
-    private ManagedChannelBuilder<?> createCustomSslChannelBuilder(String host, int port)
-            throws DataCloudJDBCException {
+    private ManagedChannelBuilder<?> createCustomSslChannelBuilder(String host, int port) throws SQLException {
         try {
             if (hasClientCertificates()) {
                 // Mutual TLS: client certificates + truststore/CA
@@ -296,7 +295,7 @@ public class SslProperties {
                 }
             }
         } catch (Exception e) {
-            throw new DataCloudJDBCException("Failed to create SSL configuration: " + e.getMessage(), e);
+            throw new SQLException("Failed to create SSL configuration: " + e.getMessage(), "HY000", e);
         }
     }
 
@@ -316,7 +315,7 @@ public class SslProperties {
     /**
      * Creates TrustManagerFactory from JKS truststore.
      */
-    private TrustManagerFactory createTrustManagerFactoryFromJksTrustStore() throws DataCloudJDBCException {
+    private TrustManagerFactory createTrustManagerFactoryFromJksTrustStore() throws SQLException {
         try {
             KeyStore trustStore = KeyStore.getInstance(truststoreTypeValue);
             try (FileInputStream fis = new FileInputStream(truststorePathValue)) {
@@ -325,7 +324,7 @@ public class SslProperties {
             }
             return createTrustManagerFactoryFromKeyStore(trustStore);
         } catch (Exception e) {
-            throw new DataCloudJDBCException("Failed to create trust manager from truststore: " + e.getMessage(), e);
+            throw new SQLException("Failed to create trust manager from truststore: " + e.getMessage(), "HY000", e);
         }
     }
 
@@ -333,34 +332,35 @@ public class SslProperties {
      * Creates TrustManagerFactory from a KeyStore.
      * Consolidated method to avoid code duplication.
      */
-    private TrustManagerFactory createTrustManagerFactoryFromKeyStore(KeyStore trustStore)
-            throws DataCloudJDBCException {
+    private TrustManagerFactory createTrustManagerFactoryFromKeyStore(KeyStore trustStore) throws SQLException {
         try {
             TrustManagerFactory trustManagerFactory =
                     TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
             trustManagerFactory.init(trustStore);
             return trustManagerFactory;
         } catch (Exception e) {
-            throw new DataCloudJDBCException("Failed to create trust manager factory: " + e.getMessage(), e);
+            throw new SQLException("Failed to create trust manager factory: " + e.getMessage(), "HY000", e);
         }
     }
 
     /**
      * Validates that a PEM file exists and is readable.
      */
-    private static void validatePemFile(String path, String description) throws DataCloudJDBCException {
+    private static void validatePemFile(String path, String description) throws SQLException {
         File file = new File(path);
         if (!file.exists()) {
-            throw new DataCloudJDBCException(
+            throw new SQLException(
                     "File not found, ensure the file exists and the path is correct. description=" + description
-                            + ", path=" + path);
+                            + ", path=" + path,
+                    "HY000");
         }
         if (!file.canRead()) {
-            throw new DataCloudJDBCException(
-                    "File is not readable, check file permissions. description=" + description + ", path=" + path);
+            throw new SQLException(
+                    "File is not readable, check file permissions. description=" + description + ", path=" + path,
+                    "HY000");
         }
         if (file.length() == 0) {
-            throw new DataCloudJDBCException(description + " file is empty: " + path);
+            throw new SQLException(description + " file is empty: " + path, "HY000");
         }
     }
 
@@ -368,7 +368,7 @@ public class SslProperties {
      * Validates that all certificate files for mutual TLS exist and are readable.
      */
     private static void validateCertificateFiles(String clientCertPath, String clientKeyPath, String caCertPath)
-            throws DataCloudJDBCException {
+            throws SQLException {
         validatePemFile(clientCertPath, "Client certificate");
         validatePemFile(clientKeyPath, "Client private key");
 

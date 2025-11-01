@@ -6,7 +6,7 @@ package com.salesforce.datacloud.jdbc.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
+import java.sql.SQLException;
 import java.util.Properties;
 import org.junit.jupiter.api.Test;
 
@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 class SslPropertiesTest {
 
     @Test
-    void testDefaultValues() throws DataCloudJDBCException {
+    void testDefaultValues() throws SQLException {
         SslProperties props = SslProperties.defaultProperties();
 
         assertThat(props.getSslMode()).isEqualTo(SslProperties.SslMode.DEFAULT_TLS);
@@ -29,7 +29,7 @@ class SslPropertiesTest {
     }
 
     @Test
-    void testSslDisabledProperty() throws DataCloudJDBCException {
+    void testSslDisabledProperty() throws SQLException {
         Properties props = new Properties();
         props.setProperty("ssl.disabled", "true");
 
@@ -38,7 +38,7 @@ class SslPropertiesTest {
     }
 
     @Test
-    void testSslCertificateProperties() throws DataCloudJDBCException {
+    void testSslCertificateProperties() throws SQLException {
         // Test with only truststore (no client certs or CA cert) to avoid file validation
         Properties props = new Properties();
         props.setProperty("ssl.truststore.path", "/path/to/truststore.jks");
@@ -54,7 +54,7 @@ class SslPropertiesTest {
     }
 
     @Test
-    void testBooleanParsing() throws DataCloudJDBCException {
+    void testBooleanParsing() throws SQLException {
         Properties props = new Properties();
         props.setProperty("ssl.disabled", "false");
 
@@ -63,7 +63,7 @@ class SslPropertiesTest {
     }
 
     @Test
-    void testCaseInsensitiveBooleanParsing() throws DataCloudJDBCException {
+    void testCaseInsensitiveBooleanParsing() throws SQLException {
         Properties props = new Properties();
         props.setProperty("ssl.disabled", "FALSE");
 
@@ -72,7 +72,7 @@ class SslPropertiesTest {
     }
 
     @Test
-    void testToPropertiesSerialization() throws DataCloudJDBCException {
+    void testToPropertiesSerialization() throws SQLException {
         // Test SSL disabled serialization
         Properties props = new Properties();
         props.setProperty("ssl.disabled", "true");
@@ -94,7 +94,7 @@ class SslPropertiesTest {
     }
 
     @Test
-    void testDetermineSslMode() throws DataCloudJDBCException {
+    void testDetermineSslMode() throws SQLException {
         // Test SSL disabled
         Properties props = new Properties();
         props.setProperty("ssl.disabled", "true");

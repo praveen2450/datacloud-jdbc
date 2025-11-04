@@ -20,12 +20,10 @@ import java.util.Properties;
 import javax.net.ssl.TrustManagerFactory;
 import lombok.Builder;
 import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
 
 /**
  * SSL/TLS properties for DataCloud JDBC connections.
  * */
-@Slf4j
 @Getter
 @Builder
 public class SslProperties {
@@ -313,7 +311,6 @@ public class SslProperties {
         if (caCertPath != null) {
             validatePemFile(caCertPath, "CA certificate");
         }
-        log.info("Certificate file validation completed successfully");
     }
 
     private static void validatePemFile(String path, String description) throws SQLException {

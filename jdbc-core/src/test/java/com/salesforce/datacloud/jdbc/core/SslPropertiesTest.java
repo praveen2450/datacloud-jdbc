@@ -33,7 +33,7 @@ class SslPropertiesTest {
         props.setProperty("ssl.disabled", "true");
 
         SslProperties sslProps = SslProperties.ofDestructive(props);
-        
+
         // Verify SSL disabled is parsed correctly
         assertThat(sslProps).isNotNull();
         assertThat(props).isEmpty(); // All properties consumed
@@ -74,7 +74,7 @@ class SslPropertiesTest {
         props.setProperty("ssl.disabled", "FALSE");
 
         SslProperties sslProps = SslProperties.ofDestructive(props);
-        
+
         // Verify case-insensitive boolean parsing
         assertThat(sslProps).isNotNull();
         assertThat(props).isEmpty(); // All properties consumed
@@ -101,5 +101,4 @@ class SslPropertiesTest {
         assertThat(serialized.getProperty("ssl.disabled")).isNull();
         assertThat(serialized.getProperty("ssl.truststore.path")).isEqualTo("/path/to/truststore.jks");
     }
-
 }

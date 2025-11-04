@@ -5,16 +5,17 @@
 package com.salesforce.datacloud.jdbc.core;
 
 import static com.salesforce.datacloud.jdbc.util.PropertyParsingUtils.takeOptional;
-import static com.salesforce.datacloud.jdbc.util.PropertyParsingUtils.takeRequired;
 
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.netty.GrpcSslContexts;
 import io.grpc.netty.NettyChannelBuilder;
 import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
 import java.io.File;
 import java.io.FileInputStream;
 import java.security.KeyStore;
 import java.sql.SQLException;
+import java.util.Optional;
 import java.util.Properties;
 import javax.net.ssl.TrustManagerFactory;
 import lombok.Builder;
@@ -28,6 +29,12 @@ import lombok.extern.slf4j.Slf4j;
 @Getter
 @Builder
 public class SslProperties {
+    public enum SslMode {
+        DISABLED,
+        DEFAULT_TLS,
+        ONE_SIDED_TLS,
+        MUTUAL_TLS;
+    }
     // Property to disable SSL (for testing only, we might change the implementation in future)
     public static final String SSL_DISABLED = "ssl.disabled";
 
@@ -43,26 +50,31 @@ public class SslProperties {
 
     // Internal constants
     private static final String DEFAULT_TRUSTSTORE_TYPE = "JKS";
-    private static final String CA_CERT_ENTRY_NAME = "ca-cert";
 
     @Builder.Default
     private final SslMode sslMode = SslMode.DEFAULT_TLS;
 
+    // For SslMode.ONE_SIDED_TLS and SslMode.MUTUAL_TLS (optional for both)
     @Builder.Default
     private final String truststorePathValue = null;
 
+    // For SslMode.ONE_SIDED_TLS and SslMode.MUTUAL_TLS (optional for both, only if truststore is used)
     @Builder.Default
     private final String truststorePasswordValue = null;
 
+    // For SslMode.ONE_SIDED_TLS and SslMode.MUTUAL_TLS (optional for both, only if truststore is used)
     @Builder.Default
     private final String truststoreTypeValue = DEFAULT_TRUSTSTORE_TYPE;
 
+    // For SslMode.MUTUAL_TLS (required for mutual TLS)
     @Builder.Default
     private final String clientCertPathValue = null;
 
+    // For SslMode.MUTUAL_TLS (required for mutual TLS)
     @Builder.Default
     private final String clientKeyPathValue = null;
 
+    // For SslMode.ONE_SIDED_TLS and SslMode.MUTUAL_TLS (optional for both, alternative to truststore)
     @Builder.Default
     private final String caCertPathValue = null;
 
@@ -76,46 +88,51 @@ public class SslProperties {
      */
     public static SslProperties ofDestructive(Properties props) throws SQLException {
         SslPropertiesBuilder builder = SslProperties.builder();
-
-        // Parse SSL disabled flag
         boolean sslDisabled =
                 takeOptional(props, SSL_DISABLED).map(Boolean::parseBoolean).orElse(false);
 
-        // If SSL is disabled, no other SSL properties are required.
+        Optional<String> clientCertPath = takeOptional(props, SSL_CLIENT_CERT_PATH);
+        Optional<String> clientKeyPath = takeOptional(props, SSL_CLIENT_KEY_PATH);
+        Optional<String> caCertPath = takeOptional(props, SSL_CA_CERT_PATH);
+        Optional<String> truststorePath = takeOptional(props, SSL_TRUSTSTORE_PATH);
+        Optional<String> truststorePassword = takeOptional(props, SSL_TRUSTSTORE_PASSWORD);
+        Optional<String> truststoreType = takeOptional(props, SSL_TRUSTSTORE_TYPE);
+
+        // If SSL is disabled, set mode and return early
         if (sslDisabled) {
             builder.sslMode(SslMode.DISABLED);
             return builder.build();
         }
 
-        String caCertPath = takeOptional(props, SSL_CA_CERT_PATH).orElse(null);
+        // Determine SSL mode based on which properties are present
+        boolean hasClientCert =
+                clientCertPath.isPresent() && !clientCertPath.get().isEmpty();
+        boolean hasClientKey = clientKeyPath.isPresent() && !clientKeyPath.get().isEmpty();
+        boolean hasCaCert = caCertPath.isPresent() && !caCertPath.get().isEmpty();
+        boolean hasTruststore =
+                truststorePath.isPresent() && !truststorePath.get().isEmpty();
 
-        // Determine SSL mode and set credentials
-        if (props.containsKey(SSL_CLIENT_CERT_PATH) && props.containsKey(SSL_CLIENT_KEY_PATH)) {
-            // Client certificates present, use mutual TLS
-            String clientCertPath = takeRequired(props, SSL_CLIENT_CERT_PATH);
-            String clientKeyPath = takeRequired(props, SSL_CLIENT_KEY_PATH);
-
-            validateCertificateFiles(clientCertPath, clientKeyPath, caCertPath);
-
+        if (hasClientCert && hasClientKey) {
+            // Both client cert and key present with non-empty values: MUTUAL_TLS mode
             builder.sslMode(SslMode.MUTUAL_TLS);
-            builder.clientCertPathValue(clientCertPath);
-            builder.clientKeyPathValue(clientKeyPath);
 
-            if (caCertPath != null) {
-                builder.caCertPathValue(caCertPath);
+            // Validate certificate files early (fail fast)
+            validateCertificateFiles(clientCertPath.get(), clientKeyPath.get(), caCertPath.orElse(null));
+
+            builder.clientCertPathValue(clientCertPath.get());
+            builder.clientKeyPathValue(clientKeyPath.get());
+
+            // CA cert is optional for mutual TLS (might use truststore instead)
+            if (hasCaCert) {
+                builder.caCertPathValue(caCertPath.get());
             }
 
-            // Also set truststore if present
-            if (props.containsKey(SSL_TRUSTSTORE_PATH)) {
-                String truststorePath = takeRequired(props, SSL_TRUSTSTORE_PATH);
-                builder.truststorePathValue(truststorePath);
-                builder.truststorePasswordValue(
-                        takeOptional(props, SSL_TRUSTSTORE_PASSWORD).orElse(null));
-                builder.truststoreTypeValue(
-                        takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
-            }
-        } else if (props.containsKey(SSL_CLIENT_CERT_PATH) || props.containsKey(SSL_CLIENT_KEY_PATH)) {
-            if (props.containsKey(SSL_CLIENT_CERT_PATH)) {
+            // Truststore is also optional for mutual TLS
+            setTruststoreProperties(truststorePath, truststorePassword, truststoreType, builder);
+
+        } else if (hasClientCert || hasClientKey) {
+            // Only one of cert/key present:  Error (both required for mutual TLS)
+            if (hasClientCert) {
                 throw new SQLException(
                         "Client certificate provided but private key is missing. Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
                         "28000");
@@ -124,29 +141,46 @@ public class SslProperties {
                         "Client private key provided but certificate is missing. Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
                         "28000");
             }
-        } else if (props.containsKey(SSL_TRUSTSTORE_PATH) || caCertPath != null) {
-            // Only truststore/CA cert (no client certs), use one-sided TLS
+        } else if (hasTruststore || hasCaCert) {
+            // Only truststore or CA cert present (no client certs): ONE_SIDED_TLS mode
             builder.sslMode(SslMode.ONE_SIDED_TLS);
 
-            if (props.containsKey(SSL_TRUSTSTORE_PATH)) {
-                String truststorePath = takeRequired(props, SSL_TRUSTSTORE_PATH);
-                builder.truststorePathValue(truststorePath);
-                builder.truststorePasswordValue(
-                        takeOptional(props, SSL_TRUSTSTORE_PASSWORD).orElse(null));
-                builder.truststoreTypeValue(
-                        takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
-            }
+            // Set truststore if provided (already validated non-empty above)
+            setTruststoreProperties(truststorePath, truststorePassword, truststoreType, builder);
 
-            if (caCertPath != null) {
-                validatePemFile(caCertPath, "CA certificate");
-                builder.caCertPathValue(caCertPath);
+            // Set CA cert if provided and validate it (already validated non-empty above)
+            if (hasCaCert) {
+                validatePemFile(caCertPath.get(), "CA certificate");
+                builder.caCertPathValue(caCertPath.get());
             }
         } else {
-            // No custom configuration provided, use default TLS
+            // No custom SSL configuration provided :  DEFAULT_TLS mode
+            // Uses system-wide default certificates for verification
             builder.sslMode(SslMode.DEFAULT_TLS);
         }
 
         return builder.build();
+    }
+
+    /**
+     * Helper method to set truststore properties from Optional values to builder.
+     * Validates that empty strings are not set as property values (defensive programming).
+     *
+     * @param truststorePath Optional truststore path
+     * @param truststorePassword Optional truststore password
+     * @param truststoreType Optional truststore type
+     * @param builder The builder to set properties on
+     */
+    private static void setTruststoreProperties(
+            Optional<String> truststorePath,
+            Optional<String> truststorePassword,
+            Optional<String> truststoreType,
+            SslPropertiesBuilder builder) {
+        if (truststorePath.isPresent() && !truststorePath.get().isEmpty()) {
+            builder.truststorePathValue(truststorePath.get());
+            builder.truststorePasswordValue(truststorePassword.orElse(null));
+            builder.truststoreTypeValue(truststoreType.orElse(DEFAULT_TRUSTSTORE_TYPE));
+        }
     }
 
     public static SslProperties defaultProperties() {
@@ -173,6 +207,7 @@ public class SslProperties {
                 if (clientKeyPathValue != null) {
                     props.setProperty(SSL_CLIENT_KEY_PATH, clientKeyPathValue);
                 }
+            // intentional fall-through to ONE_SIDED_TLS to serialize common truststore/CA properties
             case ONE_SIDED_TLS:
                 if (truststorePathValue != null) {
                     props.setProperty(SSL_TRUSTSTORE_PATH, truststorePathValue);
@@ -193,17 +228,6 @@ public class SslProperties {
         }
 
         return props;
-    }
-
-    /**
-     * SSL/TLS connection modes supported by the DataCloud JDBC driver.
-     */
-    @Getter
-    public enum SslMode {
-        DISABLED(),
-        DEFAULT_TLS(),
-        ONE_SIDED_TLS(),
-        MUTUAL_TLS();
     }
 
     /**
@@ -234,52 +258,25 @@ public class SslProperties {
      */
     private ManagedChannelBuilder<?> createCustomSslChannelBuilder(String host, int port) throws SQLException {
         try {
-            if (clientCertPathValue != null && clientKeyPathValue != null) {
-                // Mutual TLS: client certificates + truststore/CA
-                if (truststorePathValue != null) {
-                    // JKS truststore + PEM client certs
-                    TrustManagerFactory tmf = createTrustManagerFactory();
-                    SslContext sslContext = GrpcSslContexts.forClient()
-                            .trustManager(tmf)
-                            .keyManager(new File(clientCertPathValue), new File(clientKeyPathValue))
-                            .build();
-                    return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
-                } else if (caCertPathValue != null) {
-                    // PEM CA cert + PEM client certs
-                    SslContext sslContext = GrpcSslContexts.forClient()
-                            .trustManager(new File(caCertPathValue))
-                            .keyManager(new File(clientCertPathValue), new File(clientKeyPathValue))
-                            .build();
-                    return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
-                } else {
-                    // System truststore + PEM client certs
-                    TrustManagerFactory tmf = createTrustManagerFactory();
-                    SslContext sslContext = GrpcSslContexts.forClient()
-                            .trustManager(tmf)
-                            .keyManager(new File(clientCertPathValue), new File(clientKeyPathValue))
-                            .build();
-                    return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
-                }
+            // Build SSL context with trust manager and optional key manager
+            SslContextBuilder sslContextBuilder = GrpcSslContexts.forClient();
+
+            // Configure trust manager (CA verification)
+            if (caCertPathValue != null) {
+                // Use PEM CA certificate file
+                sslContextBuilder.trustManager(new File(caCertPathValue));
             } else {
-                // One-sided TLS: only truststore/CA (no client certs)
-                if (truststorePathValue != null) {
-                    TrustManagerFactory tmf = createTrustManagerFactory();
-                    SslContext sslContext =
-                            GrpcSslContexts.forClient().trustManager(tmf).build();
-                    return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
-                } else if (caCertPathValue != null) {
-                    validatePemFile(caCertPathValue, "CA certificate");
-                    SslContext sslContext = GrpcSslContexts.forClient()
-                            .trustManager(new File(caCertPathValue))
-                            .build();
-                    return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
-                } else {
-                    TrustManagerFactory tmf = createTrustManagerFactory();
-                    SslContext sslContext =
-                            GrpcSslContexts.forClient().trustManager(tmf).build();
-                    return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
-                }
+                // Use JKS truststore or system default
+                sslContextBuilder.trustManager(createTrustManagerFactory());
             }
+
+            // Configure key manager for mutual TLS (if client certs provided)
+            if (clientCertPathValue != null && clientKeyPathValue != null) {
+                sslContextBuilder.keyManager(new File(clientCertPathValue), new File(clientKeyPathValue));
+            }
+
+            SslContext sslContext = sslContextBuilder.build();
+            return NettyChannelBuilder.forAddress(host, port).sslContext(sslContext);
         } catch (Exception e) {
             throw new SQLException("Failed to create SSL configuration: " + e.getMessage(), "HY000", e);
         }
@@ -293,7 +290,10 @@ public class SslProperties {
                     char[] password = truststorePasswordValue != null ? truststorePasswordValue.toCharArray() : null;
                     trustStore.load(fis, password);
                 }
-                return createTrustManagerFactoryFromKeyStore(trustStore);
+                TrustManagerFactory trustManagerFactory =
+                        TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+                trustManagerFactory.init(trustStore);
+                return trustManagerFactory;
             } catch (Exception e) {
                 throw new SQLException("Failed to create trust manager from truststore: " + e.getMessage(), "HY000", e);
             }
@@ -304,15 +304,16 @@ public class SslProperties {
         return tmf;
     }
 
-    private TrustManagerFactory createTrustManagerFactoryFromKeyStore(KeyStore trustStore) throws SQLException {
-        try {
-            TrustManagerFactory trustManagerFactory =
-                    TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-            trustManagerFactory.init(trustStore);
-            return trustManagerFactory;
-        } catch (Exception e) {
-            throw new SQLException("Failed to create trust manager factory: " + e.getMessage(), "HY000", e);
+    private static void validateCertificateFiles(String clientCertPath, String clientKeyPath, String caCertPath)
+            throws SQLException {
+        validatePemFile(clientCertPath, "Client certificate");
+        validatePemFile(clientKeyPath, "Client private key");
+
+        // CA certificate is optional (might use JKS truststore instead)
+        if (caCertPath != null) {
+            validatePemFile(caCertPath, "CA certificate");
         }
+        log.info("Certificate file validation completed successfully");
     }
 
     private static void validatePemFile(String path, String description) throws SQLException {
@@ -331,17 +332,5 @@ public class SslProperties {
         if (file.length() == 0) {
             throw new SQLException(description + " file is empty: " + path, "HY000");
         }
-    }
-
-    private static void validateCertificateFiles(String clientCertPath, String clientKeyPath, String caCertPath)
-            throws SQLException {
-        validatePemFile(clientCertPath, "Client certificate");
-        validatePemFile(clientKeyPath, "Client private key");
-
-        // CA certificate is optional (might use JKS truststore instead)
-        if (caCertPath != null) {
-            validatePemFile(caCertPath, "CA certificate");
-        }
-        log.info("Certificate file validation completed successfully");
     }
 }

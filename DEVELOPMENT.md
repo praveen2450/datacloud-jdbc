@@ -73,6 +73,8 @@ Both drivers support the following properties:
 - `grpc.retryPolicy.backoffMultiplier`: Backoff multiplier
 - `grpc.retryPolicy.retryableStatusCodes`: Comma-separated list of retryable status codes (default: "UNAVAILABLE")
 
+In addition, the `jdbc:salesforce-hyper` driver supports:
+
 **SSL/TLS Properties:**
 - `ssl.disabled`: Disable SSL/TLS and use plaintext connection (default: false)
 - `ssl.truststore.path`: Path to JKS truststore file for custom CA certificates
@@ -82,13 +84,7 @@ Both drivers support the following properties:
 - `ssl.client.certPath`: Path to PEM file containing client certificate (for mutual TLS)
 - `ssl.client.keyPath`: Path to PEM file containing client private key (for mutual TLS)
 
-**SSL Modes:**
-- `DISABLED`: Plaintext connection (when `ssl.disabled=true`)
-- `DEFAULT_TLS`: Standard TLS using system truststore
-- `ONE_SIDED_TLS`: Custom TLS with custom CA or truststore (server authentication only)
-- `MUTUAL_TLS`: Mutual TLS with client certificates and custom CA/truststore
-
-In addition, the `salesforce-datacloud` driver supports:
+In addition, the `jdbc:salesforce-datacloud` driver supports:
 
 **Authentication Properties:**
 - `clientId`: OAuth client ID (required)

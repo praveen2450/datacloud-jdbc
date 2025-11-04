@@ -10,11 +10,8 @@ import com.salesforce.datacloud.jdbc.HyperDatasource;
 import com.salesforce.datacloud.jdbc.core.ConnectionProperties;
 import com.salesforce.datacloud.jdbc.core.DataCloudConnection;
 import com.salesforce.datacloud.jdbc.core.DataCloudStatement;
-import com.salesforce.datacloud.jdbc.core.GrpcChannelProperties;
 import com.salesforce.datacloud.jdbc.core.JdbcDriverStubProvider;
-import com.salesforce.datacloud.jdbc.core.SslProperties;
 import com.salesforce.datacloud.jdbc.hyper.HyperServerManager.ConfigFile;
-import com.salesforce.datacloud.jdbc.util.PropertyParsingUtils;
 import io.grpc.ClientInterceptor;
 import io.grpc.ManagedChannelBuilder;
 import java.sql.ResultSet;
@@ -81,36 +78,16 @@ public class LocalHyperTestBase implements BeforeAllCallback {
     @SneakyThrows
     public static DataCloudConnection getHyperQueryConnection(HyperServerProcess server, Properties properties) {
         properties.setProperty("ssl.disabled", "true");
-        SslProperties sslProps = SslProperties.ofDestructive(properties);
-        ConnectionProperties connectionProps = ConnectionProperties.ofDestructive(properties);
-        GrpcChannelProperties grpcProps = GrpcChannelProperties.ofDestructive(properties);
-
-        // Validate remaining properties after parsing
-        PropertyParsingUtils.validateRemainingProperties(properties);
-        return (DataCloudConnection) HyperDatasource.builder()
-                .host("127.0.0.1")
-                .port(server.getPort())
-                .sslProperties(sslProps)
-                .connectionProperties(connectionProps)
-                .grpcChannelProperties(grpcProps)
-                .dataspace("")
-                .build()
-                .getConnection();
+        String url = "jdbc:salesforce-hyper://127.0.0.1:" + server.getPort();
+        return HyperDatasource.connectUsingProperties(url, properties);
     }
 
     @SneakyThrows
     public static DataCloudConnection getHyperQueryConnection(HyperServerProcess server) {
-        SslProperties sslProps =
-                SslProperties.builder().sslMode(SslProperties.SslMode.DISABLED).build();
-        return (DataCloudConnection) HyperDatasource.builder()
-                .host("127.0.0.1")
-                .port(server.getPort())
-                .sslProperties(sslProps)
-                .connectionProperties(ConnectionProperties.defaultProperties())
-                .grpcChannelProperties(GrpcChannelProperties.defaultProperties())
-                .dataspace("")
-                .build()
-                .getConnection();
+        Properties properties = new Properties();
+        properties.setProperty("ssl.disabled", "true");
+        String url = "jdbc:salesforce-hyper://127.0.0.1:" + server.getPort();
+        return HyperDatasource.connectUsingProperties(url, properties);
     }
 
     public static DataCloudConnection getHyperQueryConnection(Properties properties) {
@@ -118,17 +95,11 @@ public class LocalHyperTestBase implements BeforeAllCallback {
     }
 
     public static DataCloudConnection getHyperQueryConnection() throws SQLException {
-        SslProperties sslProps =
-                SslProperties.builder().sslMode(SslProperties.SslMode.DISABLED).build();
-        return (DataCloudConnection) HyperDatasource.builder()
-                .host("127.0.0.1")
-                .port(HyperServerManager.get(ConfigFile.SMALL_CHUNKS).getPort())
-                .sslProperties(sslProps)
-                .connectionProperties(ConnectionProperties.defaultProperties())
-                .grpcChannelProperties(GrpcChannelProperties.defaultProperties())
-                .dataspace("")
-                .build()
-                .getConnection();
+        Properties properties = new Properties();
+        properties.setProperty("ssl.disabled", "true");
+        String url = "jdbc:salesforce-hyper://127.0.0.1:"
+                + HyperServerManager.get(ConfigFile.SMALL_CHUNKS).getPort();
+        return HyperDatasource.connectUsingProperties(url, properties);
     }
 
     @Override

@@ -69,27 +69,6 @@ public class HyperDatasource implements DataSource {
     }
 
     /**
-     * Internal utility function to create a DataCloudConnection with the given properties.
-     *
-     * The jdbcUrl is optional and will only influence `DatabaseMetaData.getURL()`.
-     * The actual connection will be created with the properties provided.
-     */
-    private static DataCloudConnection createConnection(
-            @NonNull String host,
-            int port,
-            @NonNull SslProperties sslProperties,
-            @NonNull ConnectionProperties connectionProperties,
-            @NonNull GrpcChannelProperties grpcChannelProperties,
-            @NonNull String dataspace,
-            JdbcURL jdbcUrl)
-            throws SQLException {
-        port = port == -1 ? 7483 : port;
-        ManagedChannelBuilder<?> sslChannelBuilder = sslProperties.createChannelBuilder(host, port);
-        JdbcDriverStubProvider stubProvider = JdbcDriverStubProvider.of(sslChannelBuilder, grpcChannelProperties);
-        return DataCloudConnection.of(stubProvider, connectionProperties, dataspace, jdbcUrl);
-    }
-
-    /**
      * Connects to the Data Cloud using the given URL and properties.
      * Similar to the interface accessible via `DriverManager.getConnection()`.
      */
@@ -111,18 +90,39 @@ public class HyperDatasource implements DataSource {
             // Always use SSL - let SslProperties determine the mode
             SslProperties sslProps = SslProperties.ofDestructive(properties);
 
-            // Create SSL channel using SslProperties
-            ManagedChannelBuilder<?> sslChannelBuilder = sslProps.createChannelBuilder(host, port);
-            JdbcDriverStubProvider sslStubProvider =
-                    JdbcDriverStubProvider.of(sslChannelBuilder, GrpcChannelProperties.ofDestructive(properties));
             val connectionProperties = ConnectionProperties.ofDestructive(properties);
+            val grpcChannelProperties = GrpcChannelProperties.ofDestructive(properties);
             String dataspace = takeOptional(properties, "dataspace").orElse("");
             PropertyParsingUtils.validateRemainingProperties(properties);
-            return DataCloudConnection.of(sslStubProvider, connectionProperties, dataspace, jdbcUrl);
+
+            // Setup the connection
+            return createConnection(
+                    host, port, sslProps, connectionProperties, grpcChannelProperties, dataspace, jdbcUrl);
         } catch (SQLException e) {
             log.error("Failed to connect with URL {}: {}", url, e.getMessage(), e);
             throw e;
         }
+    }
+
+    /**
+     * Internal utility function to create a DataCloudConnection with the given properties.
+     *
+     * The jdbcUrl is optional and will only influence `DatabaseMetaData.getURL()`.
+     * The actual connection will be created with the properties provided.
+     */
+    private static DataCloudConnection createConnection(
+            @NonNull String host,
+            int port,
+            @NonNull SslProperties sslProperties,
+            @NonNull ConnectionProperties connectionProperties,
+            @NonNull GrpcChannelProperties grpcChannelProperties,
+            @NonNull String dataspace,
+            JdbcURL jdbcUrl)
+            throws SQLException {
+        port = port == -1 ? 7483 : port;
+        ManagedChannelBuilder<?> sslChannelBuilder = sslProperties.createChannelBuilder(host, port);
+        JdbcDriverStubProvider stubProvider = JdbcDriverStubProvider.of(sslChannelBuilder, grpcChannelProperties);
+        return DataCloudConnection.of(stubProvider, connectionProperties, dataspace, jdbcUrl);
     }
 
     @Override

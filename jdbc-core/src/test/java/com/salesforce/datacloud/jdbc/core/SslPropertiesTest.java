@@ -62,7 +62,7 @@ class SslPropertiesTest {
         props.setProperty("ssl.disabled", "false");
 
         SslProperties sslProps = SslProperties.ofDestructive(props);
-        
+
         // Verify boolean is parsed correctly (ssl.disabled=false means SSL is enabled)
         assertThat(sslProps).isNotNull();
         assertThat(props).isEmpty(); // All properties consumed

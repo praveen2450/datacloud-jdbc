@@ -92,8 +92,7 @@ public class HyperDatasource implements DataSource {
             PropertyParsingUtils.validateRemainingProperties(properties);
 
             // Setup the connection
-            return createConnection(
-                    host, port, sslProps, connectionProperties, grpcChannelProperties, jdbcUrl);
+            return createConnection(host, port, sslProps, connectionProperties, grpcChannelProperties, jdbcUrl);
         } catch (SQLException e) {
             log.error("Failed to connect with URL {}: {}", url, e.getMessage(), e);
             throw e;

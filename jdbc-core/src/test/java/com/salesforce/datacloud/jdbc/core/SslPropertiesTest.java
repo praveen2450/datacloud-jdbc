@@ -40,17 +40,23 @@ class SslPropertiesTest {
     }
 
     @Test
-    void testSslCertificateProperties() throws SQLException {
-        // Test with only truststore (no client certs or CA cert) to avoid file validation
+    void testSslCertificateProperties() throws Exception {
+        // Create a temporary file for truststore validation
+        java.io.File tempTruststore = java.io.File.createTempFile("test-truststore", ".jks");
+        tempTruststore.deleteOnExit();
+        // Write some content so file is not empty
+        java.nio.file.Files.write(tempTruststore.toPath(), "dummy content".getBytes());
+
+        // Test with only truststore (no client certs or CA cert)
         Properties props = new Properties();
-        props.setProperty("ssl.truststore.path", "/path/to/truststore.jks");
+        props.setProperty("ssl.truststore.path", tempTruststore.getAbsolutePath());
         props.setProperty("ssl.truststore.password", "password");
         props.setProperty("ssl.truststore.type", "PKCS12");
 
         SslProperties sslProps = SslProperties.ofDestructive(props);
 
         // Verify properties are parsed correctly
-        assertThat(sslProps.getTruststorePathValue()).isEqualTo("/path/to/truststore.jks");
+        assertThat(sslProps.getTruststorePathValue()).isEqualTo(tempTruststore.getAbsolutePath());
         assertThat(sslProps.getTruststorePasswordValue()).isEqualTo("password");
         assertThat(sslProps.getTruststoreTypeValue()).isEqualTo("PKCS12");
         assertThat(props).isEmpty(); // All properties consumed
@@ -81,7 +87,7 @@ class SslPropertiesTest {
     }
 
     @Test
-    void testToPropertiesSerialization() throws SQLException {
+    void testToPropertiesSerialization() throws Exception {
         // Test SSL disabled serialization
         Properties props = new Properties();
         props.setProperty("ssl.disabled", "true");
@@ -93,12 +99,18 @@ class SslPropertiesTest {
         assertThat(serialized.getProperty("ssl.truststore.path")).isNull();
 
         // Test one-sided TLS serialization
-        props.remove("ssl.disabled");
-        props.setProperty("ssl.truststore.path", "/path/to/truststore.jks");
+        // Create a temporary file for truststore validation
+        java.io.File tempTruststore = java.io.File.createTempFile("test-truststore", ".jks");
+        tempTruststore.deleteOnExit();
+        // Write some content so file is not empty
+        java.nio.file.Files.write(tempTruststore.toPath(), "dummy content".getBytes());
+
+        props = new Properties();
+        props.setProperty("ssl.truststore.path", tempTruststore.getAbsolutePath());
         sslProps = SslProperties.ofDestructive(props);
         serialized = sslProps.toProperties();
 
         assertThat(serialized.getProperty("ssl.disabled")).isNull();
-        assertThat(serialized.getProperty("ssl.truststore.path")).isEqualTo("/path/to/truststore.jks");
+        assertThat(serialized.getProperty("ssl.truststore.path")).isEqualTo(tempTruststore.getAbsolutePath());
     }
 }

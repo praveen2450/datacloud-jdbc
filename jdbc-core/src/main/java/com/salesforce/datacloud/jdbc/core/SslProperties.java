@@ -15,7 +15,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.security.KeyStore;
 import java.sql.SQLException;
-import java.util.Optional;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Properties;
 import javax.net.ssl.TrustManagerFactory;
 import lombok.Builder;
@@ -86,99 +87,113 @@ public class SslProperties {
      */
     public static SslProperties ofDestructive(Properties props) throws SQLException {
         SslPropertiesBuilder builder = SslProperties.builder();
+
+        // Extract ssl.disabled early (needed for validation and when ssl.disabled is passed explicitly as false)
         boolean sslDisabled =
-                takeOptional(props, SSL_DISABLED).map(Boolean::parseBoolean).orElse(false);
+                Boolean.parseBoolean(takeOptional(props, SSL_DISABLED).orElse("false"));
 
-        Optional<String> clientCertPath = takeOptional(props, SSL_CLIENT_CERT_PATH);
-        Optional<String> clientKeyPath = takeOptional(props, SSL_CLIENT_KEY_PATH);
-        Optional<String> caCertPath = takeOptional(props, SSL_CA_CERT_PATH);
-        Optional<String> truststorePath = takeOptional(props, SSL_TRUSTSTORE_PATH);
-        Optional<String> truststorePassword = takeOptional(props, SSL_TRUSTSTORE_PASSWORD);
-        Optional<String> truststoreType = takeOptional(props, SSL_TRUSTSTORE_TYPE);
-
-        // If SSL is disabled, set mode and return early
-        if (sslDisabled) {
-            builder.sslMode(SslMode.DISABLED);
-            return builder.build();
+        // Validate conflicting properties before determining mode
+        if (props.containsKey(SSL_CA_CERT_PATH) && props.containsKey(SSL_TRUSTSTORE_PATH)) {
+            throw new SQLException("Cannot specify both ssl.ca.certPath and ssl.truststore.path. ", "HY000");
         }
 
-        // Determine SSL mode based on which properties are present
-        boolean hasClientCert =
-                clientCertPath.isPresent() && !clientCertPath.get().isEmpty();
-        boolean hasClientKey = clientKeyPath.isPresent() && !clientKeyPath.get().isEmpty();
-        boolean hasCaCert = caCertPath.isPresent() && !caCertPath.get().isEmpty();
-        boolean hasTruststore =
-                truststorePath.isPresent() && !truststorePath.get().isEmpty();
+        // Throw exception early, as other sslProperties can not exist when ssl.disabled is true
+        if (sslDisabled
+                && (props.containsKey(SSL_CLIENT_CERT_PATH)
+                        || props.containsKey(SSL_CLIENT_KEY_PATH)
+                        || props.containsKey(SSL_CA_CERT_PATH)
+                        || props.containsKey(SSL_TRUSTSTORE_PATH)
+                        || props.containsKey(SSL_TRUSTSTORE_PASSWORD)
+                        || props.containsKey(SSL_TRUSTSTORE_TYPE))) {
+            throw new SQLException("Cannot specify ssl.disabled=true with other SSL properties. ", "HY000");
+        }
 
-        if (hasClientCert && hasClientKey) {
-            // Both client cert and key present with non-empty values: MUTUAL_TLS mode
+        if (sslDisabled) {
+            builder.sslMode(SslMode.DISABLED);
+        } else if (props.containsKey(SSL_CLIENT_CERT_PATH) && props.containsKey(SSL_CLIENT_KEY_PATH)) {
+            // if both client cert and client key are present, TLS mode should be mtls
             builder.sslMode(SslMode.MUTUAL_TLS);
 
-            // Validate certificate files early (fail fast)
-            validateCertificateFiles(clientCertPath.get(), clientKeyPath.get(), caCertPath.orElse(null));
+            // Extract and validate client certificate properties
+            String clientCertPath = takeOptional(props, SSL_CLIENT_CERT_PATH).orElse(null);
+            String clientKeyPath = takeOptional(props, SSL_CLIENT_KEY_PATH).orElse(null);
 
-            builder.clientCertPathValue(clientCertPath.get());
-            builder.clientKeyPathValue(clientKeyPath.get());
+            validateFilePath(SSL_CLIENT_CERT_PATH, clientCertPath);
+            validateFilePath(SSL_CLIENT_KEY_PATH, clientKeyPath);
 
-            // CA cert is optional for mutual TLS (might use truststore instead)
-            if (hasCaCert) {
-                builder.caCertPathValue(caCertPath.get());
+            builder.clientCertPathValue(clientCertPath);
+            builder.clientKeyPathValue(clientKeyPath);
+
+            // Either ca_cert or Trust store can be present,not both
+            if (props.containsKey(SSL_CA_CERT_PATH)) {
+                String caCertPath = takeOptional(props, SSL_CA_CERT_PATH).orElse(null);
+                validateFilePath(SSL_CA_CERT_PATH, caCertPath);
+                builder.caCertPathValue(caCertPath);
+
+            } else if (props.containsKey(SSL_TRUSTSTORE_PATH)) {
+                String truststorePath = takeOptional(props, SSL_TRUSTSTORE_PATH).orElse(null);
+                validateFilePath(SSL_TRUSTSTORE_PATH, truststorePath);
+
+                builder.truststorePathValue(truststorePath);
+                builder.truststorePasswordValue(
+                        takeOptional(props, SSL_TRUSTSTORE_PASSWORD).orElse(null));
+                builder.truststoreTypeValue(
+                        takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
             }
 
-            // Truststore is also optional for mutual TLS
-            setTruststoreProperties(truststorePath, truststorePassword, truststoreType, builder);
-
-        } else if (hasClientCert || hasClientKey) {
-            // Only one of cert/key present:  Error (both required for mutual TLS)
-            if (hasClientCert) {
+        } else if (props.containsKey(SSL_CLIENT_CERT_PATH) || props.containsKey(SSL_CLIENT_KEY_PATH)) {
+            // Can't have only one of cert or key
+            if (props.containsKey(SSL_CLIENT_CERT_PATH)) {
                 throw new SQLException(
-                        "Client certificate provided but private key is missing. Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
+                        "Client certificate provided but private key is missing. "
+                                + "Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
                         "28000");
             } else {
                 throw new SQLException(
-                        "Client private key provided but certificate is missing. Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
+                        "Client private key provided but certificate is missing. "
+                                + "Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
                         "28000");
             }
-        } else if (hasTruststore || hasCaCert) {
-            // Only truststore or CA cert present (no client certs): ONE_SIDED_TLS mode
+
+        } else if (props.containsKey(SSL_CA_CERT_PATH) || props.containsKey(SSL_TRUSTSTORE_PATH)) {
             builder.sslMode(SslMode.ONE_SIDED_TLS);
 
-            // Set truststore if provided (already validated non-empty above)
-            setTruststoreProperties(truststorePath, truststorePassword, truststoreType, builder);
+            if (props.containsKey(SSL_CA_CERT_PATH)) {
+                String caCertPath = takeOptional(props, SSL_CA_CERT_PATH).orElse(null);
+                validateFilePath(SSL_CA_CERT_PATH, caCertPath);
+                builder.caCertPathValue(caCertPath);
 
-            // Set CA cert if provided and validate it (already validated non-empty above)
-            if (hasCaCert) {
-                validatePemFile(caCertPath.get(), "CA certificate");
-                builder.caCertPathValue(caCertPath.get());
+            } else {
+                String truststorePath = takeOptional(props, SSL_TRUSTSTORE_PATH).orElse(null);
+                validateFilePath(SSL_TRUSTSTORE_PATH, truststorePath);
+
+                builder.truststorePathValue(truststorePath);
+                builder.truststorePasswordValue(
+                        takeOptional(props, SSL_TRUSTSTORE_PASSWORD).orElse(null));
+                builder.truststoreTypeValue(
+                        takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
             }
+
         } else {
-            // No custom SSL configuration provided :  DEFAULT_TLS mode
-            // Uses system-wide default certificates for verification
+            // DEFAULT TLS mode - no properties to extract
             builder.sslMode(SslMode.DEFAULT_TLS);
         }
 
-        return builder.build();
-    }
-
-    /**
-     * Helper method to set truststore properties from Optional values to builder.
-     * Validates that empty strings are not set as property values (defensive programming).
-     *
-     * @param truststorePath Optional truststore path
-     * @param truststorePassword Optional truststore password
-     * @param truststoreType Optional truststore type
-     * @param builder The builder to set properties on
-     */
-    private static void setTruststoreProperties(
-            Optional<String> truststorePath,
-            Optional<String> truststorePassword,
-            Optional<String> truststoreType,
-            SslPropertiesBuilder builder) {
-        if (truststorePath.isPresent() && !truststorePath.get().isEmpty()) {
-            builder.truststorePathValue(truststorePath.get());
-            builder.truststorePasswordValue(truststorePassword.orElse(null));
-            builder.truststoreTypeValue(truststoreType.orElse(DEFAULT_TRUSTSTORE_TYPE));
+        // Check for mixed SSL properties from different modes
+        if (!Collections.disjoint(
+                props.keySet(),
+                Arrays.asList(
+                        SSL_DISABLED,
+                        SSL_TRUSTSTORE_PATH,
+                        SSL_TRUSTSTORE_PASSWORD,
+                        SSL_TRUSTSTORE_TYPE,
+                        SSL_CLIENT_CERT_PATH,
+                        SSL_CLIENT_KEY_PATH,
+                        SSL_CA_CERT_PATH))) {
+            throw new SQLException("SSL properties from different modes cannot be mixed", "HY000");
         }
+
+        return builder.build();
     }
 
     public static SslProperties defaultProperties() {
@@ -302,32 +317,35 @@ public class SslProperties {
         return tmf;
     }
 
-    private static void validateCertificateFiles(String clientCertPath, String clientKeyPath, String caCertPath)
-            throws SQLException {
-        validatePemFile(clientCertPath, "Client certificate");
-        validatePemFile(clientKeyPath, "Client private key");
-
-        // CA certificate is optional (might use JKS truststore instead)
-        if (caCertPath != null) {
-            validatePemFile(caCertPath, "CA certificate");
+    /**
+     * Validates that a file path is non-empty and points to a valid, readable, non-empty file.
+     * This validation applies to all SSL-related files (PEM certificates, private keys, truststore files).
+     *
+     * @param propertyKey The property key (for error messages)
+     * @param filePath The file path value to validate
+     * @throws SQLException if validation fails (path is empty, file doesn't exist, not readable, or empty file)
+     */
+    private static void validateFilePath(String propertyKey, String filePath) throws SQLException {
+        // Validate non-empty
+        if (filePath == null || filePath.trim().isEmpty()) {
+            throw new SQLException(propertyKey + " cannot be empty", "HY000");
         }
-    }
 
-    private static void validatePemFile(String path, String description) throws SQLException {
-        File file = new File(path);
+        // Validate file exists and is readable
+        File file = new File(filePath);
         if (!file.exists()) {
             throw new SQLException(
-                    "File not found, ensure the file exists and the path is correct. description=" + description
-                            + ", path=" + path,
+                    "File not found, ensure the file exists and the path is correct. property=" + propertyKey
+                            + ", path=" + filePath,
                     "HY000");
         }
         if (!file.canRead()) {
             throw new SQLException(
-                    "File is not readable, check file permissions. description=" + description + ", path=" + path,
+                    "File is not readable, check file permissions. property=" + propertyKey + ", path=" + filePath,
                     "HY000");
         }
         if (file.length() == 0) {
-            throw new SQLException(description + " file is empty: " + path, "HY000");
+            throw new SQLException(propertyKey + " file is empty: " + filePath, "HY000");
         }
     }
 }

@@ -92,26 +92,25 @@ public class SslProperties {
         boolean sslDisabled =
                 Boolean.parseBoolean(takeOptional(props, SSL_DISABLED).orElse("false"));
 
-        // Validate conflicting properties before determining mode
-        if (props.containsKey(SSL_CA_CERT_PATH) && props.containsKey(SSL_TRUSTSTORE_PATH)) {
-            throw new SQLException("Cannot specify both ssl.ca.certPath and ssl.truststore.path. ", "HY000");
-        }
-
-        // Throw exception early, as other sslProperties can not exist when ssl.disabled is true
-        if (sslDisabled
-                && (props.containsKey(SSL_CLIENT_CERT_PATH)
-                        || props.containsKey(SSL_CLIENT_KEY_PATH)
-                        || props.containsKey(SSL_CA_CERT_PATH)
-                        || props.containsKey(SSL_TRUSTSTORE_PATH)
-                        || props.containsKey(SSL_TRUSTSTORE_PASSWORD)
-                        || props.containsKey(SSL_TRUSTSTORE_TYPE))) {
-            throw new SQLException("Cannot specify ssl.disabled=true with other SSL properties. ", "HY000");
-        }
-
         if (sslDisabled) {
+            // checks if any additional properties are present with sslDisabled, if yes, then it throws error
+            if (!Collections.disjoint(
+                    props.keySet(),
+                    Arrays.asList(
+                            SSL_CLIENT_CERT_PATH,
+                            SSL_CLIENT_KEY_PATH,
+                            SSL_CA_CERT_PATH,
+                            SSL_TRUSTSTORE_PATH,
+                            SSL_TRUSTSTORE_PASSWORD,
+                            SSL_TRUSTSTORE_TYPE))) {
+                throw new SQLException("Cannot specify ssl.disabled=true with other SSL properties. ", "HY000");
+            }
             builder.sslMode(SslMode.DISABLED);
         } else if (props.containsKey(SSL_CLIENT_CERT_PATH) && props.containsKey(SSL_CLIENT_KEY_PATH)) {
             // if both client cert and client key are present, TLS mode should be mtls
+            if (props.containsKey(SSL_CA_CERT_PATH) && props.containsKey(SSL_TRUSTSTORE_PATH)) {
+                throw new SQLException("Cannot specify both ssl.ca.certPath and ssl.truststore.path. ", "HY000");
+            }
             builder.sslMode(SslMode.MUTUAL_TLS);
 
             // Extract and validate client certificate properties
@@ -140,7 +139,6 @@ public class SslProperties {
                 builder.truststoreTypeValue(
                         takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
             }
-
         } else if (props.containsKey(SSL_CLIENT_CERT_PATH) || props.containsKey(SSL_CLIENT_KEY_PATH)) {
             // Can't have only one of cert or key
             if (props.containsKey(SSL_CLIENT_CERT_PATH)) {
@@ -154,15 +152,16 @@ public class SslProperties {
                                 + "Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
                         "28000");
             }
-
         } else if (props.containsKey(SSL_CA_CERT_PATH) || props.containsKey(SSL_TRUSTSTORE_PATH)) {
+            if (props.containsKey(SSL_CA_CERT_PATH) && props.containsKey(SSL_TRUSTSTORE_PATH)) {
+                throw new SQLException("Cannot specify both ssl.ca.certPath and ssl.truststore.path. ", "HY000");
+            }
             builder.sslMode(SslMode.ONE_SIDED_TLS);
 
             if (props.containsKey(SSL_CA_CERT_PATH)) {
                 String caCertPath = takeOptional(props, SSL_CA_CERT_PATH).orElse(null);
                 validateFilePath(SSL_CA_CERT_PATH, caCertPath);
                 builder.caCertPathValue(caCertPath);
-
             } else {
                 String truststorePath = takeOptional(props, SSL_TRUSTSTORE_PATH).orElse(null);
                 validateFilePath(SSL_TRUSTSTORE_PATH, truststorePath);
@@ -173,7 +172,6 @@ public class SslProperties {
                 builder.truststoreTypeValue(
                         takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
             }
-
         } else {
             // DEFAULT TLS mode - no properties to extract
             builder.sslMode(SslMode.DEFAULT_TLS);

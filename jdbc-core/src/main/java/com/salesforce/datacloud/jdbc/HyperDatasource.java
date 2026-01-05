@@ -85,14 +85,14 @@ public class HyperDatasource implements DataSource {
             jdbcUrl.addParametersToProperties(properties);
 
             // Always use SSL - let SslProperties determine the mode
-            SslProperties sslProps = SslProperties.ofDestructive(properties);
+            val sslProperties = SslProperties.ofDestructive(properties);
 
             val connectionProperties = ConnectionProperties.ofDestructive(properties);
             val grpcChannelProperties = GrpcChannelProperties.ofDestructive(properties);
             PropertyParsingUtils.validateRemainingProperties(properties);
 
             // Setup the connection
-            return createConnection(host, port, sslProps, connectionProperties, grpcChannelProperties, jdbcUrl);
+            return createConnection(host, port, sslProperties, connectionProperties, grpcChannelProperties, jdbcUrl);
         } catch (SQLException e) {
             log.error("Failed to connect with URL {}: {}", url, e.getMessage(), e);
             throw e;

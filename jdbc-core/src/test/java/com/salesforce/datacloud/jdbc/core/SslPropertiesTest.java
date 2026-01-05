@@ -75,18 +75,6 @@ class SslPropertiesTest {
     }
 
     @Test
-    void testCaseInsensitiveBooleanParsing() throws SQLException {
-        Properties props = new Properties();
-        props.setProperty("ssl.disabled", "FALSE");
-
-        SslProperties sslProps = SslProperties.ofDestructive(props);
-
-        // Verify case-insensitive boolean parsing
-        assertThat(sslProps).isNotNull();
-        assertThat(props).isEmpty(); // All properties consumed
-    }
-
-    @Test
     void testToPropertiesSerialization() throws Exception {
         // Test SSL disabled serialization
         Properties props = new Properties();

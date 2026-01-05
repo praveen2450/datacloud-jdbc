@@ -5,6 +5,8 @@
 package com.salesforce.datacloud.jdbc.core;
 
 import static com.salesforce.datacloud.jdbc.util.PropertyParsingUtils.takeOptional;
+import static com.salesforce.datacloud.jdbc.util.PropertyParsingUtils.takeOptionalBoolean;
+import static com.salesforce.datacloud.jdbc.util.PropertyParsingUtils.takeRequired;
 
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.netty.GrpcSslContexts;
@@ -89,9 +91,7 @@ public class SslProperties {
         SslPropertiesBuilder builder = SslProperties.builder();
 
         // Extract ssl.disabled early (needed for validation and when ssl.disabled is passed explicitly as false)
-        boolean sslDisabled =
-                Boolean.parseBoolean(takeOptional(props, SSL_DISABLED).orElse("false"));
-
+        boolean sslDisabled = takeOptionalBoolean(props, SSL_DISABLED).orElse(false);
         if (sslDisabled) {
             // checks if any additional properties are present with sslDisabled, if yes, then it throws error
             if (!Collections.disjoint(
@@ -106,16 +106,16 @@ public class SslProperties {
                 throw new SQLException("Cannot specify ssl.disabled=true with other SSL properties. ", "HY000");
             }
             builder.sslMode(SslMode.DISABLED);
-        } else if (props.containsKey(SSL_CLIENT_CERT_PATH) && props.containsKey(SSL_CLIENT_KEY_PATH)) {
+        } else if (props.containsKey(SSL_CLIENT_CERT_PATH) || props.containsKey(SSL_CLIENT_KEY_PATH)) {
             // if both client cert and client key are present, TLS mode should be mtls
             if (props.containsKey(SSL_CA_CERT_PATH) && props.containsKey(SSL_TRUSTSTORE_PATH)) {
-                throw new SQLException("Cannot specify both ssl.ca.certPath and ssl.truststore.path. ", "HY000");
+                throw new SQLException("Either ca_cert or Trust store can be present,not both", "HY000");
             }
             builder.sslMode(SslMode.MUTUAL_TLS);
 
             // Extract and validate client certificate properties
-            String clientCertPath = takeOptional(props, SSL_CLIENT_CERT_PATH).orElse(null);
-            String clientKeyPath = takeOptional(props, SSL_CLIENT_KEY_PATH).orElse(null);
+            String clientCertPath = takeRequired(props, SSL_CLIENT_CERT_PATH);
+            String clientKeyPath = takeRequired(props, SSL_CLIENT_KEY_PATH);
 
             validateFilePath(SSL_CLIENT_CERT_PATH, clientCertPath);
             validateFilePath(SSL_CLIENT_KEY_PATH, clientKeyPath);
@@ -125,12 +125,11 @@ public class SslProperties {
 
             // Either ca_cert or Trust store can be present,not both
             if (props.containsKey(SSL_CA_CERT_PATH)) {
-                String caCertPath = takeOptional(props, SSL_CA_CERT_PATH).orElse(null);
+                String caCertPath = takeRequired(props, SSL_CA_CERT_PATH);
                 validateFilePath(SSL_CA_CERT_PATH, caCertPath);
                 builder.caCertPathValue(caCertPath);
-
             } else if (props.containsKey(SSL_TRUSTSTORE_PATH)) {
-                String truststorePath = takeOptional(props, SSL_TRUSTSTORE_PATH).orElse(null);
+                String truststorePath = takeRequired(props, SSL_TRUSTSTORE_PATH);
                 validateFilePath(SSL_TRUSTSTORE_PATH, truststorePath);
 
                 builder.truststorePathValue(truststorePath);
@@ -139,19 +138,6 @@ public class SslProperties {
                 builder.truststoreTypeValue(
                         takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
             }
-        } else if (props.containsKey(SSL_CLIENT_CERT_PATH) || props.containsKey(SSL_CLIENT_KEY_PATH)) {
-            // Can't have only one of cert or key
-            if (props.containsKey(SSL_CLIENT_CERT_PATH)) {
-                throw new SQLException(
-                        "Client certificate provided but private key is missing. "
-                                + "Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
-                        "28000");
-            } else {
-                throw new SQLException(
-                        "Client private key provided but certificate is missing. "
-                                + "Both ssl.client.certPath and ssl.client.keyPath are required for mutual TLS.",
-                        "28000");
-            }
         } else if (props.containsKey(SSL_CA_CERT_PATH) || props.containsKey(SSL_TRUSTSTORE_PATH)) {
             if (props.containsKey(SSL_CA_CERT_PATH) && props.containsKey(SSL_TRUSTSTORE_PATH)) {
                 throw new SQLException("Cannot specify both ssl.ca.certPath and ssl.truststore.path. ", "HY000");
@@ -159,11 +145,11 @@ public class SslProperties {
             builder.sslMode(SslMode.ONE_SIDED_TLS);
 
             if (props.containsKey(SSL_CA_CERT_PATH)) {
-                String caCertPath = takeOptional(props, SSL_CA_CERT_PATH).orElse(null);
+                String caCertPath = takeRequired(props, SSL_CA_CERT_PATH);
                 validateFilePath(SSL_CA_CERT_PATH, caCertPath);
                 builder.caCertPathValue(caCertPath);
-            } else {
-                String truststorePath = takeOptional(props, SSL_TRUSTSTORE_PATH).orElse(null);
+            } else if (props.containsKey(SSL_TRUSTSTORE_PATH)) {
+                String truststorePath = takeRequired(props, SSL_TRUSTSTORE_PATH);
                 validateFilePath(SSL_TRUSTSTORE_PATH, truststorePath);
 
                 builder.truststorePathValue(truststorePath);
@@ -294,25 +280,25 @@ public class SslProperties {
     }
 
     private TrustManagerFactory createTrustManagerFactory() throws Exception {
-        if (truststorePathValue != null) {
-            try {
-                KeyStore trustStore = KeyStore.getInstance(truststoreTypeValue);
-                try (FileInputStream fis = new FileInputStream(truststorePathValue)) {
-                    char[] password = truststorePasswordValue != null ? truststorePasswordValue.toCharArray() : null;
-                    trustStore.load(fis, password);
-                }
-                TrustManagerFactory trustManagerFactory =
-                        TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-                trustManagerFactory.init(trustStore);
-                return trustManagerFactory;
-            } catch (Exception e) {
-                throw new SQLException("Failed to create trust manager from truststore: " + e.getMessage(), "HY000", e);
-            }
+        if (truststorePathValue == null) {
+            // System truststore (fallback)
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init((KeyStore) null);
+            return tmf;
         }
-        // System truststore (fallback)
-        TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-        tmf.init((KeyStore) null);
-        return tmf;
+        try {
+            KeyStore trustStore = KeyStore.getInstance(truststoreTypeValue);
+            try (FileInputStream fis = new FileInputStream(truststorePathValue)) {
+                char[] password = truststorePasswordValue != null ? truststorePasswordValue.toCharArray() : null;
+                trustStore.load(fis, password);
+            }
+            TrustManagerFactory trustManagerFactory =
+                    TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            trustManagerFactory.init(trustStore);
+            return trustManagerFactory;
+        } catch (Exception e) {
+            throw new SQLException("Failed to create trust manager from truststore: " + e.getMessage(), "HY000", e);
+        }
     }
 
     /**

@@ -33,7 +33,7 @@ public class DataCloudStatement implements Statement, AutoCloseable {
 
     protected ResultSet resultSet;
 
-    protected static final String NOT_SUPPORTED_IN_DATACLOUD_QUERY = "Write is not supported in Data Cloud query";
+    protected static final String NOT_SUPPORTED_IN_DATACLOUD_QUERY = "Feature is not supported in Data Cloud query";
     protected static final String BATCH_EXECUTION_IS_NOT_SUPPORTED =
             "Batch execution is not supported in Data Cloud query";
     protected static final String CHANGE_FETCH_DIRECTION_IS_NOT_SUPPORTED = "Changing fetch direction is not supported";
@@ -58,14 +58,13 @@ public class DataCloudStatement implements Statement, AutoCloseable {
         this.statementProperties = connection.getConnectionProperties().getStatementProperties();
     }
 
-    protected HyperGrpcClientExecutor getQueryClient(QueryTimeout queryTimeout) throws SQLException {
-        val stub = connection.getStub();
+    protected ExecuteQueryParamBuilder getQueryParamBuilder(QueryTimeout queryTimeout) throws SQLException {
         val querySettings = new HashMap<>(statementProperties.getQuerySettings());
         if (!queryTimeout.getServerQueryTimeout().isZero()) {
             querySettings.put(
                     "query_timeout", queryTimeout.getServerQueryTimeout().toMillis() + "ms");
         }
-        return HyperGrpcClientExecutor.of(stub, querySettings);
+        return ExecuteQueryParamBuilder.of(querySettings);
     }
 
     @Getter
@@ -115,7 +114,7 @@ public class DataCloudStatement implements Statement, AutoCloseable {
             log.info(
                     "executeAdaptiveQuery completed. queryId={}",
                     queryHandle.getQueryStatus().getQueryId());
-            return (DataCloudResultSet) resultSet;
+            return resultSet;
         } catch (StatusRuntimeException ex) {
             String queryId = null;
             if (queryHandle != null && queryHandle.getQueryStatus() != null) {
@@ -128,11 +127,12 @@ public class DataCloudStatement implements Statement, AutoCloseable {
     private QueryResultIterator executeAdaptiveQuery(String sql) throws SQLException {
         val queryTimeout = QueryTimeout.of(
                 statementProperties.getQueryTimeout(), statementProperties.getQueryTimeoutLocalEnforcementDelay());
-        val client = getQueryClient(queryTimeout);
+        val paramBuilder = getQueryParamBuilder(queryTimeout);
         val queryParam = targetMaxRows > 0
-                ? client.getAdaptiveRowLimitQueryParams(sql, targetMaxRows, targetMaxBytes)
-                : client.getAdaptiveQueryParams(sql);
-        val stub = client.getStub()
+                ? paramBuilder.getAdaptiveRowLimitQueryParams(sql, targetMaxRows, targetMaxBytes)
+                : paramBuilder.getAdaptiveQueryParams(sql);
+        val stub = connection
+                .getStub()
                 .withDeadlineAfter(
                         queryTimeout.getLocalDeadline().getRemaining().toMillis(), TimeUnit.MILLISECONDS);
         val iterator = QueryResultIterator.of(stub, queryParam);
@@ -147,9 +147,10 @@ public class DataCloudStatement implements Statement, AutoCloseable {
         try {
             val queryTimeout = QueryTimeout.of(
                     statementProperties.getQueryTimeout(), statementProperties.getQueryTimeoutLocalEnforcementDelay());
-            val client = getQueryClient(queryTimeout);
-            val request = client.getQueryParams(sql, QueryParam.TransferMode.ASYNC);
-            val stub = client.getStub()
+            val paramBuilder = getQueryParamBuilder(queryTimeout);
+            val request = paramBuilder.getQueryParams(sql, QueryParam.TransferMode.ASYNC);
+            val stub = connection
+                    .getStub()
                     .withDeadlineAfter(
                             queryTimeout.getLocalDeadline().getRemaining().toMillis(), TimeUnit.MILLISECONDS);
 

@@ -31,8 +31,8 @@ public class QueryResultIteratorTest extends InterceptedHyperTestBase {
     private static final String TEST_QUERY = "SELECT * FROM test_table adaptiveTest";
     private static final String TEST_QUERY_ID = "test-query-123";
 
-    private HyperServiceGrpc.HyperServiceBlockingStub setupStub() {
-        return getInterceptedGrpcExecutor().getStub().withDeadlineAfter(30000, TimeUnit.MILLISECONDS);
+    private HyperServiceGrpc.HyperServiceStub setupStub() {
+        return getInterceptedStub().withDeadlineAfter(30000, TimeUnit.MILLISECONDS);
     }
 
     @Test

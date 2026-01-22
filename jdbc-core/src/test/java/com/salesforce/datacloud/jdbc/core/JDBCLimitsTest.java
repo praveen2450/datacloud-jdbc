@@ -12,11 +12,15 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
+import com.salesforce.datacloud.jdbc.hyper.HyperServerConfig;
 import com.salesforce.datacloud.jdbc.hyper.HyperServerManager;
 import com.salesforce.datacloud.jdbc.hyper.LocalHyperTestBase;
 import io.grpc.*;
+import io.grpc.stub.MetadataUtils;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.Collections;
 import java.util.Properties;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -135,6 +139,97 @@ public class JDBCLimitsTest {
 
     @Test
     @SneakyThrows
+    public void testLargeParameterCount() {
+        String value = repeat('x', 1024);
+        // 10'000 is the limit in Hyper
+        int prepareCount = 10000;
+        assertWithConnection(connection -> {
+            // Create a VALUES clause with many parameters
+            String values = String.join(", ", Collections.nCopies(prepareCount, "(?)"));
+            val stmt = connection.prepareStatement("SELECT SUM(LENGTH(v)) FROM (VALUES " + values + ") AS t(v)");
+            for (int i = 1; i <= prepareCount; ++i) {
+                stmt.setString(i, value);
+            }
+            val result = stmt.executeQuery();
+            result.next();
+            // Verify we get back the correct count of values
+            assertThat(result.getInt(1)).isEqualTo(prepareCount * value.length());
+        });
+    }
+
+    @Test
+    @SneakyThrows
+    public void testLargeArrayLikeParameter() {
+        // Generate a million unique strings
+        int itemCount = 1000000;
+        String[] values = new String[itemCount];
+        for (int i = 0; i < itemCount; i++) {
+            values[i] = "value" + i;
+        }
+
+        // Create an ARRAY string literal with all values, a direct array parameter is not supported by the JDBC driver
+        // yet
+        String arrayLiteral = "ARRAY['" + String.join("','", values) + "']";
+
+        // Verify that WHERE IN with a large array works
+        assertWithConnection(connection -> {
+            // Use the array in a WHERE IN clause
+            String sql = String.format(
+                    "SELECT COUNT(*) FROM generate_series(%d, %d) g WHERE 'value' || g = ANY(%s::varchar[])",
+                    itemCount - 100, itemCount + 10000, arrayLiteral);
+
+            try (val stmt = connection.createStatement();
+                    val result = stmt.executeQuery(sql)) {
+                result.next();
+                // We should find exactly one match
+                assertThat(result.getInt(1)).isEqualTo(100);
+            }
+        });
+    }
+
+    @Test
+    @SneakyThrows
+    public void testLargeColumnCount() {
+        int columnCount = 100000;
+        String value = "test";
+
+        // Verify that queries with many columns are supported
+        assertWithConnection(connection -> {
+            // Create a SELECT statement with columnCount columns
+            StringBuilder sb = new StringBuilder("SELECT ");
+            // Generate column expressions: 1 as c1, 2 as c2, ..., columnCount as cN
+            for (int i = 1; i <= columnCount; i++) {
+                if (i > 1) {
+                    sb.append(", ");
+                }
+                sb.append(i).append(" as c").append(i);
+            }
+            sb.append(" FROM (VALUES(1)) AS t");
+
+            val stmt = connection.prepareStatement(sb.toString());
+            val result = stmt.executeQuery();
+
+            // Verify the result has the expected number of columns
+            val metaData = result.getMetaData();
+            assertThat(metaData.getColumnCount()).isEqualTo(columnCount);
+
+            // Verify we can read the first row
+            assertThat(result.next()).isTrue();
+
+            // Verify values in the first row
+            for (int i = 1; i <= columnCount; i++) {
+                assertThat(result.getInt(i)).isEqualTo(i);
+                // With this its suuuuuper slow (before optimization), but should be fast now
+                assertThat(result.getInt("c" + i)).isEqualTo(i);
+            }
+
+            // Verify there's only one row
+            assertThat(result.next()).isFalse();
+        });
+    }
+
+    @Test
+    @SneakyThrows
     public void testLargeHeaders() {
         // We expect that under 1 MB total header size should be fine, we use workload as it'll get injected into the
         // header
@@ -198,8 +293,8 @@ public class JDBCLimitsTest {
         }
 
         @Override
-        public HyperServiceGrpc.HyperServiceBlockingStub getStub() {
-            return HyperServiceGrpc.newBlockingStub(channel);
+        public HyperServiceGrpc.HyperServiceStub getStub() {
+            return HyperServiceGrpc.newStub(channel);
         }
 
         @Override
@@ -278,6 +373,57 @@ public class JDBCLimitsTest {
             logMemoryUsage("After ResultSet consumption", rs.getRow());
             log.warn("Peak memory usage during test: {}", formatMemory(maxUsedMemory));
         });
+    }
+
+    /**
+     * This tests a Scenario where the reader was consuming results were slowly and checks that this doesn't lead to
+     * unnoticed data loss. Previously we had a bug where if a client was not consuming the rows of the execute query
+     * fast enough that due to the cancel some message would be missed but the call flow would still continue as
+     * cancel is expected at that point.
+     */
+    @Test
+    public void testSlowReader() throws SQLException, InterruptedException {
+        // The connection properties
+        Properties properties = new Properties();
+
+        // The timeout for cancelling gRPC call to ensure that caller is reading slower than server is cancelling
+        int timeoutMs = 3000;
+
+        // You can bring your own gRPC channels that are set up in the way you like (mTLS / Plaintext / ...) and your
+        // own interceptors as well as executors.
+        ManagedChannelBuilder<?> channelBuilder = ManagedChannelBuilder.forAddress(
+                        "127.0.0.1",
+                        HyperServerManager.get(
+                                        HyperServerConfig.builder()
+                                                .grpcRequestTimeoutSeconds(Integer.toString(timeoutMs) + "ms")
+                                                .grpcAdaptiveTimeoutSeconds(Integer.toString(timeoutMs - 1000) + "ms"),
+                                        HyperServerManager.ConfigFile.DEFAULT)
+                                .getPort())
+                .usePlaintext();
+        // Inject adaptive timeout header on all calls
+        Metadata metadata = new Metadata();
+        metadata.put(
+                Metadata.Key.of("x-hyperdb-adaptive-timeout", Metadata.ASCII_STRING_MARSHALLER),
+                Integer.toString(timeoutMs) + "ms");
+        channelBuilder = channelBuilder.intercept(MetadataUtils.newAttachHeadersInterceptor(metadata));
+        // You can set settings for the stub provider
+        val grpcChannelProperties = GrpcChannelProperties.builder().build();
+        val stubProvider = JdbcDriverStubProvider.of(channelBuilder, grpcChannelProperties);
+        // You can also set settings for the connection
+        val connectionProperties = ConnectionProperties.builder().build();
+
+        // Use the JDBC Driver interface
+        try (DataCloudConnection conn = DataCloudConnection.of(stubProvider, connectionProperties, null)) {
+            try (Statement stmt = conn.createStatement()) {
+                ResultSet rs = stmt.executeQuery(
+                        "SELECT s, lpad('X', 1024*1024, 'X') FROM generate_series(1,40) s ORDER BY s ASC");
+                Thread.sleep(timeoutMs + 100);
+                for (int i = 1; i <= 40; ++i) {
+                    rs.next();
+                    assertThat(rs.getLong(1)).isEqualTo(i);
+                }
+            }
+        }
     }
 
     private static String repeat(char c, int length) {

@@ -40,9 +40,9 @@ public class SslProperties {
     public static final String SSL_DISABLED = "ssl.disabled";
 
     // JKS truststore properties - for trust verification
-    public static final String SSL_TRUSTSTORE_PATH = "ssl.truststore.path";
-    public static final String SSL_TRUSTSTORE_PASSWORD = "ssl.truststore.password";
-    public static final String SSL_TRUSTSTORE_TYPE = "ssl.truststore.type";
+    public static final String SSL_TRUSTSTORE_PATH = "ssl.trustStore.path";
+    public static final String SSL_TRUSTSTORE_PASSWORD = "ssl.trustStore.password";
+    public static final String SSL_TRUSTSTORE_TYPE = "ssl.trustStore.type";
 
     // PEM certificate properties - for trust verification and client authentication
     public static final String SSL_CLIENT_CERT_PATH = "ssl.client.certPath";
@@ -124,40 +124,14 @@ public class SslProperties {
             builder.clientKeyPathValue(clientKeyPath);
 
             // Either ca_cert or Trust store can be present,not both
-            if (props.containsKey(SSL_CA_CERT_PATH)) {
-                String caCertPath = takeRequired(props, SSL_CA_CERT_PATH);
-                validateFilePath(SSL_CA_CERT_PATH, caCertPath);
-                builder.caCertPathValue(caCertPath);
-            } else if (props.containsKey(SSL_TRUSTSTORE_PATH)) {
-                String truststorePath = takeRequired(props, SSL_TRUSTSTORE_PATH);
-                validateFilePath(SSL_TRUSTSTORE_PATH, truststorePath);
-
-                builder.truststorePathValue(truststorePath);
-                builder.truststorePasswordValue(
-                        takeOptional(props, SSL_TRUSTSTORE_PASSWORD).orElse(null));
-                builder.truststoreTypeValue(
-                        takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
-            }
+            extractAndConfigureCaCertOrTruststore(props, builder);
         } else if (props.containsKey(SSL_CA_CERT_PATH) || props.containsKey(SSL_TRUSTSTORE_PATH)) {
             if (props.containsKey(SSL_CA_CERT_PATH) && props.containsKey(SSL_TRUSTSTORE_PATH)) {
                 throw new SQLException("Cannot specify both ssl.ca.certPath and ssl.truststore.path. ", "HY000");
             }
             builder.sslMode(SslMode.ONE_SIDED_TLS);
 
-            if (props.containsKey(SSL_CA_CERT_PATH)) {
-                String caCertPath = takeRequired(props, SSL_CA_CERT_PATH);
-                validateFilePath(SSL_CA_CERT_PATH, caCertPath);
-                builder.caCertPathValue(caCertPath);
-            } else if (props.containsKey(SSL_TRUSTSTORE_PATH)) {
-                String truststorePath = takeRequired(props, SSL_TRUSTSTORE_PATH);
-                validateFilePath(SSL_TRUSTSTORE_PATH, truststorePath);
-
-                builder.truststorePathValue(truststorePath);
-                builder.truststorePasswordValue(
-                        takeOptional(props, SSL_TRUSTSTORE_PASSWORD).orElse(null));
-                builder.truststoreTypeValue(
-                        takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
-            }
+            extractAndConfigureCaCertOrTruststore(props, builder);
         } else {
             // DEFAULT TLS mode - no properties to extract
             builder.sslMode(SslMode.DEFAULT_TLS);
@@ -298,6 +272,31 @@ public class SslProperties {
             return trustManagerFactory;
         } catch (Exception e) {
             throw new SQLException("Failed to create trust manager from truststore: " + e.getMessage(), "HY000", e);
+        }
+    }
+
+    /**
+     * Extracts and configures trust configuration properties (CA certificate or truststore).
+     * Removes the processed properties from the Properties object.
+     *
+     * @param props The properties to extract from
+     * @param builder The builder to configure
+     * @throws SQLException if file path validation fails
+     */
+    private static void extractAndConfigureCaCertOrTruststore(Properties props, SslPropertiesBuilder builder)
+            throws SQLException {
+        if (props.containsKey(SSL_CA_CERT_PATH)) {
+            String caCertPath = takeRequired(props, SSL_CA_CERT_PATH);
+            validateFilePath(SSL_CA_CERT_PATH, caCertPath);
+            builder.caCertPathValue(caCertPath);
+        } else if (props.containsKey(SSL_TRUSTSTORE_PATH)) {
+            String truststorePath = takeRequired(props, SSL_TRUSTSTORE_PATH);
+            validateFilePath(SSL_TRUSTSTORE_PATH, truststorePath);
+
+            builder.truststorePathValue(truststorePath);
+            builder.truststorePasswordValue(
+                    takeOptional(props, SSL_TRUSTSTORE_PASSWORD).orElse(null));
+            builder.truststoreTypeValue(takeOptional(props, SSL_TRUSTSTORE_TYPE).orElse(DEFAULT_TRUSTSTORE_TYPE));
         }
     }
 

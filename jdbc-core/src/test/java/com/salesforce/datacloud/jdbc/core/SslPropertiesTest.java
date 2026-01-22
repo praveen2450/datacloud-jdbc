@@ -5,6 +5,7 @@
 package com.salesforce.datacloud.jdbc.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.sql.SQLException;
 import java.util.Properties;
@@ -49,9 +50,9 @@ class SslPropertiesTest {
 
         // Test with only truststore (no client certs or CA cert)
         Properties props = new Properties();
-        props.setProperty("ssl.truststore.path", tempTruststore.getAbsolutePath());
-        props.setProperty("ssl.truststore.password", "password");
-        props.setProperty("ssl.truststore.type", "PKCS12");
+        props.setProperty(SslProperties.SSL_TRUSTSTORE_PATH, tempTruststore.getAbsolutePath());
+        props.setProperty(SslProperties.SSL_TRUSTSTORE_PASSWORD, "password");
+        props.setProperty(SslProperties.SSL_TRUSTSTORE_TYPE, "PKCS12");
 
         SslProperties sslProps = SslProperties.ofDestructive(props);
 
@@ -84,7 +85,7 @@ class SslPropertiesTest {
         Properties serialized = sslProps.toProperties();
 
         assertThat(serialized.getProperty("ssl.disabled")).isEqualTo("true");
-        assertThat(serialized.getProperty("ssl.truststore.path")).isNull();
+        assertThat(serialized.getProperty(SslProperties.SSL_TRUSTSTORE_PATH)).isNull();
 
         // Test one-sided TLS serialization
         // Create a temporary file for truststore validation
@@ -94,11 +95,38 @@ class SslPropertiesTest {
         java.nio.file.Files.write(tempTruststore.toPath(), "dummy content".getBytes());
 
         props = new Properties();
-        props.setProperty("ssl.truststore.path", tempTruststore.getAbsolutePath());
+        props.setProperty(SslProperties.SSL_TRUSTSTORE_PATH, tempTruststore.getAbsolutePath());
         sslProps = SslProperties.ofDestructive(props);
         serialized = sslProps.toProperties();
 
         assertThat(serialized.getProperty("ssl.disabled")).isNull();
-        assertThat(serialized.getProperty("ssl.truststore.path")).isEqualTo(tempTruststore.getAbsolutePath());
+        assertThat(serialized.getProperty(SslProperties.SSL_TRUSTSTORE_PATH))
+                .isEqualTo(tempTruststore.getAbsolutePath());
+    }
+
+    @Test
+    void testErrorMissingClientKeyWhenClientCertProvided() {
+        // Error occurs at takeRequired() before file validation, so dummy path is sufficient
+        Properties props = new Properties();
+        props.setProperty(SslProperties.SSL_CLIENT_CERT_PATH, "/dummy/client/cert.pem");
+        // Missing SSL_CLIENT_KEY_PATH
+
+        IllegalArgumentException exception =
+                assertThrows(IllegalArgumentException.class, () -> SslProperties.ofDestructive(props));
+
+        assertThat(exception.getMessage()).contains("ssl.client.keyPath");
+        assertThat(exception.getMessage()).contains("missing");
+    }
+
+    @Test
+    void testErrorBothCaCertAndTruststoreSpecified() {
+        // Error occurs at validation check before file extraction, so dummy paths are sufficient
+        Properties props = new Properties();
+        props.setProperty(SslProperties.SSL_CA_CERT_PATH, "/dummy/ca/cert.pem");
+        props.setProperty(SslProperties.SSL_TRUSTSTORE_PATH, "/dummy/truststore.jks");
+
+        SQLException exception = assertThrows(SQLException.class, () -> SslProperties.ofDestructive(props));
+
+        assertThat(exception.getMessage()).contains("Cannot specify both ssl.ca.certPath and ssl.truststore.path");
     }
 }

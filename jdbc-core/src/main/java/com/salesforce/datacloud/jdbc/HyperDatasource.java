@@ -84,7 +84,6 @@ public class HyperDatasource implements DataSource {
             val properties = info != null ? (Properties) info.clone() : new Properties();
             jdbcUrl.addParametersToProperties(properties);
 
-            // Always use SSL - let SslProperties determine the mode
             val sslProperties = SslProperties.ofDestructive(properties);
 
             val connectionProperties = ConnectionProperties.ofDestructive(properties);

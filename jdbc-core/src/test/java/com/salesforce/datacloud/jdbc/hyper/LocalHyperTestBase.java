@@ -84,10 +84,7 @@ public class LocalHyperTestBase implements BeforeAllCallback {
 
     @SneakyThrows
     public static DataCloudConnection getHyperQueryConnection(HyperServerProcess server) {
-        Properties properties = new Properties();
-        properties.setProperty("ssl.disabled", "true");
-        String url = "jdbc:salesforce-hyper://127.0.0.1:" + server.getPort();
-        return HyperDatasource.connectUsingProperties(url, properties);
+        return getHyperQueryConnection(server, new Properties());
     }
 
     public static DataCloudConnection getHyperQueryConnection(Properties properties) {
@@ -95,11 +92,7 @@ public class LocalHyperTestBase implements BeforeAllCallback {
     }
 
     public static DataCloudConnection getHyperQueryConnection() throws SQLException {
-        Properties properties = new Properties();
-        properties.setProperty("ssl.disabled", "true");
-        String url = "jdbc:salesforce-hyper://127.0.0.1:"
-                + HyperServerManager.get(ConfigFile.SMALL_CHUNKS).getPort();
-        return HyperDatasource.connectUsingProperties(url, properties);
+        return getHyperQueryConnection(HyperServerManager.get(ConfigFile.SMALL_CHUNKS), new Properties());
     }
 
     @Override

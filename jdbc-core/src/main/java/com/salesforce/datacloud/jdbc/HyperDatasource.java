@@ -83,9 +83,7 @@ public class HyperDatasource implements DataSource {
             int port = jdbcUrl.getPort();
             val properties = info != null ? (Properties) info.clone() : new Properties();
             jdbcUrl.addParametersToProperties(properties);
-
             val sslProperties = SslProperties.ofDestructive(properties);
-
             val connectionProperties = ConnectionProperties.ofDestructive(properties);
             val grpcChannelProperties = GrpcChannelProperties.ofDestructive(properties);
             PropertyParsingUtils.validateRemainingProperties(properties);
